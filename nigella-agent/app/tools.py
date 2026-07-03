@@ -12,68 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from typing import Any
 
+from google import genai
 from google.adk.tools import ToolContext
+from google.genai import types
+from pydantic import BaseModel
 
-# A rich, illustrative recipe dataset in the spirit of Nigella Lawson
-RECIPES: list[dict] = [
-    {
-        "name": "Luscious Chocolate Guinness Cake",
-        "description": "A dark, damp, and altogether magnificent chocolate cake, topped with a thick, cloud-like cream cheese frosting to resemble a pint of the black stuff.",
-        "prep_time": 20,
-        "cook_time": 45,
-        "equipment": ["springform tin", "saucepan", "whisk", "bowl"],
-        "ingredients": [
-            "250ml Guinness",
-            "250g unsalted butter",
-            "75g cocoa powder",
-            "400g caster sugar",
-            "150ml sour cream",
-            "2 large eggs",
-            "1 tablespoon vanilla extract",
-            "275g plain flour",
-            "2.5 teaspoons bicarbonate of soda",
-        ],
-        "dietary_tags": ["vegetarian"],
-        "instructions": "Melt butter in Guinness in a saucepan. Whisk in cocoa and sugar. Beat sour cream with eggs and vanilla, then pour into the pan. Whisk in flour and bicarb. Bake at 180°C for 45 minutes. Top with sweetened cream cheese frosting once cool.",
-    },
-    {
-        "name": "Cosy Lemon Garlic Chicken",
-        "description": "A comforting, fragrant traybake. The chicken thighs become crisp-skinned and tender, bathed in sweet lemon juice, aromatic rosemary, and caramelized garlic cloves.",
-        "prep_time": 15,
-        "cook_time": 50,
-        "equipment": ["roasting tin", "knife", "cutting board"],
-        "ingredients": [
-            "4 chicken thighs (skin-on, bone-in)",
-            "2 lemons (quartered)",
-            "500g new potatoes (halved)",
-            "1 head of garlic (cloves separated, unpeeled)",
-            "2 tablespoons olive oil",
-            "3 sprigs of fresh rosemary",
-            "salt and pepper",
-        ],
-        "dietary_tags": ["gluten-free"],
-        "instructions": "Toss potatoes and garlic cloves in olive oil, salt, and pepper in a roasting tin. Nestle the chicken thighs and lemon quarters among them. Scatter rosemary sprigs on top. Roast at 200°C for 50 minutes until chicken is golden and crispy.",
-    },
-    {
-        "name": "Divine Tomato and Mozzarella Pasta Bake",
-        "description": "A gooey, bubbly pasta bake that smells of garlic and fresh basil. It is pure, warm, carbohydrate comfort.",
-        "prep_time": 15,
-        "cook_time": 30,
-        "equipment": ["large pot", "colander", "ovenproof dish"],
-        "ingredients": [
-            "300g penne pasta",
-            "500g tomato passata",
-            "2 cloves of garlic (minced)",
-            "2 tablespoons olive oil",
-            "125g fresh mozzarella (sliced or torn)",
-            "50g grated parmesan cheese",
-            "1 bunch of fresh basil leaves",
-        ],
-        "dietary_tags": ["vegetarian"],
-        "instructions": "Cook penne until al dente. Warm passata with olive oil, minced garlic, and salt in a pan. Mix pasta with sauce and half the basil. Transfer to an ovenproof dish. Top with mozzarella and parmesan. Bake at 200°C for 30 minutes until bubbling.",
-    },
-]
+from .database import fetch_and_parse_recipe, get_all_recipes, insert_recipe
 
 
 def get_recipes(
@@ -82,7 +28,7 @@ def get_recipes(
     max_cook_time: int | None = None,
     dietary_restrictions: list[str] | None = None,
     tool_context: ToolContext | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Searches the database of favorite recipes.
 
     Filters recipes by search terms in name/description, preparation time,
@@ -107,9 +53,10 @@ def get_recipes(
             for r in tool_context.state.get("user:dietary_restrictions", [])
         ]
 
+    recipes = get_all_recipes()
     results = []
-    for recipe in RECIPES:
-        # Check query match
+    for recipe in recipes:
+        # Filter by query
         if query:
             q = query.lower()
             if (
@@ -118,17 +65,15 @@ def get_recipes(
             ):
                 continue
 
-        # Check prep time
+        # Filter by prep time
         if max_prep_time is not None and recipe["prep_time"] > max_prep_time:
             continue
 
-        # Check cook time
+        # Filter by cook time
         if max_cook_time is not None and recipe["cook_time"] > max_cook_time:
             continue
 
-        # Check dietary restrictions match (all active restrictions must be met by recipe tags)
-        # Note: If a user is vegetarian, the recipe must have the "vegetarian" tag.
-        # If a user is gluten-free, the recipe must have "gluten-free".
+        # Filter by dietary tags
         tags = [t.lower() for t in recipe["dietary_tags"]]
         match_failed = False
         for restriction in active_restrictions:
@@ -145,7 +90,7 @@ def get_recipes(
 
 def set_user_preferences(
     dietary_restrictions: list[str], tool_context: ToolContext
-) -> dict:
+) -> dict[str, Any]:
     """Saves user dietary restrictions to the persistent user profile.
 
     Args:
@@ -162,7 +107,7 @@ def set_user_preferences(
     }
 
 
-def get_user_preferences(tool_context: ToolContext) -> dict:
+def get_user_preferences(tool_context: ToolContext) -> dict[str, Any]:
     """Retrieves the user's saved dietary preferences.
 
     Returns:
@@ -170,3 +115,72 @@ def get_user_preferences(tool_context: ToolContext) -> dict:
     """
     prefs = tool_context.state.get("user:dietary_restrictions", [])
     return {"status": "success", "dietary_restrictions": prefs}
+
+
+class _URLList(BaseModel):
+    urls: list[str]
+
+
+def search_and_add_recipes(
+    query: str, max_results: int = 1, tool_context: ToolContext | None = None
+) -> dict[str, Any]:
+    """Searches Nigella.com for recipes matching the query and adds them to the SQLite database.
+
+    Args:
+        query: The search query (e.g. 'lemon cake', 'chocolate cookies').
+        max_results: The maximum number of recipe matches to add. Default is 1.
+
+    Returns:
+        A dictionary with a success/error message and list of added recipe names.
+    """
+    client = genai.Client()
+    prompt = (
+        f"Search for recipe URLs for query '{query}' on nigella.com. "
+        f"Return a list of up to {max_results} unique recipe URLs from nigella.com. "
+        "Each URL must start with 'https://www.nigella.com/recipes/'."
+    )
+    try:
+        response = client.models.generate_content(
+            model="gemini-3.5-flash",
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                tools=[{"google_search": {}}],
+                response_mime_type="application/json",
+                response_schema=_URLList,
+            ),
+        )
+        urls = (
+            response.parsed.urls if (response.parsed and response.parsed.urls) else []
+        )
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Failed during web search: {e}",
+        }
+
+    if not urls:
+        return {
+            "status": "success",
+            "message": f"No recipes matching '{query}' were found on Nigella.com.",
+            "added_recipes": [],
+        }
+
+    added = []
+    for url in urls:
+        recipe = fetch_and_parse_recipe(url)
+        if recipe:
+            if insert_recipe(recipe):
+                added.append(recipe["name"])
+
+    if added:
+        return {
+            "status": "success",
+            "message": f"Successfully fetched and added {len(added)} recipe(s) to the local database.",
+            "added_recipes": added,
+        }
+    else:
+        return {
+            "status": "success",
+            "message": "Found matching URLs, but they were already present in the database or could not be parsed.",
+            "added_recipes": [],
+        }

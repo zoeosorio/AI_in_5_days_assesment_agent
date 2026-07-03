@@ -199,6 +199,8 @@ my_env.tfvars
 .saved_chats
 .env
 .google-agents-cli/
+artifacts/
+
 
 # A2A Inspector
 tools/a2a-inspector/
@@ -207,3 +209,10 @@ tools/a2a-inspector/
 *.pem
 *-key.json
 credentials*.json
+
+# SQLite database files
+recipes.db
+recipes.db-journal
+db.sqlite3
+db.sqlite3-journal
+
