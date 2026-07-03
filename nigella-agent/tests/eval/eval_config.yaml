@@ -1,0 +1,10 @@
+metrics_to_run:
+  - custom_response_quality
+  - nigella_voice_fidelity
+
+custom_metrics:
+  - name: custom_response_quality
+    custom_function_file: response_quality.py
+  - name: nigella_voice_fidelity
+    custom_function_file: voice_fidelity.py
+

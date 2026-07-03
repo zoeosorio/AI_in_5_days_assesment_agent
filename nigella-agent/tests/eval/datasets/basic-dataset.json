@@ -1,0 +1,25 @@
+{
+  "eval_cases": [
+    {
+      "eval_case_id": "quick_vegetarian_suggest",
+      "prompt": {
+        "role": "user",
+        "parts": [{"text": "I need a quick and comforting vegetarian recipe for dinner tonight."}]
+      }
+    },
+    {
+      "eval_case_id": "gluten_free_suggest",
+      "prompt": {
+        "role": "user",
+        "parts": [{"text": "I am gluten-free. Suggest a cosy chicken dinner recipe."}]
+      }
+    },
+    {
+      "eval_case_id": "search_cookies_fallback",
+      "prompt": {
+        "role": "user",
+        "parts": [{"text": "Do you have a recipe for Nigella's Chocolate Tahini Cookies?"}]
+      }
+    }
+  ]
+}
