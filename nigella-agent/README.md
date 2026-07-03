@@ -1,92 +1,69 @@
-# nigella-agent
+# "What Would Nigella Do?" Cooking Assistant
 
-Simple ReAct agent
-Agent generated with `agents-cli` version `1.0.0`
+This is an agentic cooking assistant that speaks in the warm, intimate, and celebrated voice of Nigella Lawson. It helps users decide what to cook tonight by searching a local database of favorites, dynamically importing new recipes from Nigella's website, and remembering user dietary preferences.
 
-## Project Structure
+---
+
+## 📂 Project Structure
 
 ```
 nigella-agent/
-├── app/         # Core agent code
-│   ├── agent.py               # Main agent logic
-│   ├── fast_api_app.py        # FastAPI Backend server
-│   └── app_utils/             # App utilities and helpers
-├── tests/                     # Unit, integration, and load tests
-├── GEMINI.md                  # AI-assisted development guide
-└── pyproject.toml             # Project dependencies
+├── app/
+│   ├── agent.py         # Root Nigella agent & Sous Chef sub-agent configuration
+│   ├── database.py      # SQLAlchemy DB schema, parser, and SQLite helper operations
+│   ├── tools.py         # Exposed ADK tools (recipe query, session state preferences)
+│   ├── fast_api_app.py  # FastAPI backend server
+│   └── app_utils/       # App utilities and session lifecycle hooks
+├── tests/               # Unit, integration, and evaluation suites
+├── AGENTS.md            # Comprehensive developer and architecture guide
+└── pyproject.toml       # Project configuration and package dependencies
 ```
 
-> 💡 **Tip:** Use [Antigravity CLI](https://antigravity.google/) for AI-assisted development - project context is pre-configured in `GEMINI.md`.
+> 💡 **Tip:** Detailed architectural patterns, Pydantic/SQLAlchemy schemas, and developer workflows are fully documented in [AGENTS.md](file:///usr/local/google/home/zoeo/Projects/jetski-cli-projects/AI_in_5_days_assesment_agent/nigella-agent/AGENTS.md).
 
-## Requirements
+---
 
-Before you begin, ensure you have:
-- **uv**: Python package manager (used for all dependency management in this project) - [Install](https://docs.astral.sh/uv/getting-started/installation/) ([add packages](https://docs.astral.sh/uv/concepts/dependencies/) with `uv add <package>`)
-- **agents-cli**: Agents CLI - Install with `uv tool install google-agents-cli`
-- **Google Cloud SDK**: For GCP services - [Install](https://cloud.google.com/sdk/docs/install)
+## 🚀 Key Features
 
+* **Warm, Sensuous Voice**: Captures Nigella Lawson's unique personality using LLM-as-judge voice fidelity testing.
+* **Separation of Voice & Detail**: Uses an `AgentTool` multi-agent delegation structure so that the backend `sous_chef` processes raw data while Nigella remains in full control of the conversational persona.
+* **Zero-Bloat Database**: No recipe text is committed to the repository. The SQLite database is created and seeded dynamically on first import by scraping recipe pages directly from Nigella.com.
+* **Dynamic Search & Ingestion**: The agent can search Nigella.com using Google Search grounding, extract, parse, validate (via Pydantic), and insert new recipes into SQLite at runtime.
+* **Persistent Session State**: Remembers user dietary restrictions across multiple turns using shared session memory.
 
-## Quick Start
+---
 
-Install `agents-cli` and its skills if not already installed:
+## 🛠️ Getting Started
 
+### 1. Installation
+Install the project dependencies and the development tools:
 ```bash
+# Setup CLI environment
 uvx google-agents-cli setup
-```
 
-Install required packages:
-
-```bash
+# Install packages
 agents-cli install
 ```
 
-Test the agent with a local web server:
-
+### 2. Run the Playground
+Launch the interactive web UI to test and converse with Nigella:
 ```bash
 agents-cli playground
 ```
 
-You can also use features from the [ADK](https://adk.dev/) CLI with `uv run adk`.
-
-## Commands
-
-| Command              | Description                                                                                 |
-| -------------------- | ------------------------------------------------------------------------------------------- |
-| `agents-cli install` | Install dependencies using uv                                                         |
-| `agents-cli playground` | Launch local development environment                                                  |
-| `agents-cli lint`    | Run code quality checks                                                               |
-| `agents-cli eval`    | Evaluate agent behavior (generate, grade, analyze, and more — see `agents-cli eval --help`) |
-| `uv run pytest tests/unit tests/integration` | Run unit and integration tests                                                        || [A2A Inspector](https://github.com/a2aproject/a2a-inspector) | Launch A2A Protocol Inspector                                                        |
-
-## 🛠️ Project Management
-
-| Command | What It Does |
-|---------|--------------|
-| `agents-cli scaffold enhance` | Add CI/CD pipelines and Terraform infrastructure |
-| `agents-cli infra cicd` | One-command setup of entire CI/CD pipeline + infrastructure |
-| `agents-cli scaffold upgrade` | Auto-upgrade to latest version while preserving customizations |
+### 3. Run Quality Evaluations
+Run the local LLM-as-judge evaluation dataset (compares response quality and voice fidelity):
+```bash
+agents-cli eval run
+```
 
 ---
 
-## Development
+## 🧪 Testing
 
-Edit your agent logic in `app/agent.py` and test with `agents-cli playground` - it auto-reloads on save.
-
-## Deployment
-
+Execute the test suites locally using pytest:
 ```bash
-gcloud config set project <your-project-id>
-agents-cli deploy
+uv run pytest
 ```
-
-To add CI/CD and Terraform, run `agents-cli scaffold enhance`.
-To set up your production infrastructure, run `agents-cli infra cicd`.
-
-## Observability
-
-Built-in telemetry exports to Cloud Trace, BigQuery, and Cloud Logging.
-
-## A2A Inspector
-
-This agent supports the [A2A Protocol](https://a2a-protocol.org/). Use the [A2A Inspector](https://github.com/a2aproject/a2a-inspector) to test interoperability.
-See the [A2A Inspector docs](https://github.com/a2aproject/a2a-inspector) for details.
+* **Unit Tests**: Test tools, database operations, and state variables in isolation.
+* **Integration Tests**: Verify end-to-end multi-agent messaging flow (requires a valid `GEMINI_API_KEY` or active Google Cloud CLI ADC credentials).

@@ -19,7 +19,11 @@ from google.adk.tools import ToolContext
 from google.genai import types
 from pydantic import BaseModel
 
-from .database import fetch_and_parse_recipe, get_all_recipes, insert_recipe
+from .database import (
+    fetch_and_parse_recipe,
+    insert_recipe,
+    query_recipes_db,
+)
 
 
 def get_recipes(
@@ -53,28 +57,17 @@ def get_recipes(
             for r in tool_context.state.get("user:dietary_restrictions", [])
         ]
 
-    recipes = get_all_recipes()
-    results = []
-    for recipe in recipes:
-        # Filter by query
-        if query:
-            q = query.lower()
-            if (
-                q not in recipe["name"].lower()
-                and q not in recipe["description"].lower()
-            ):
-                continue
+    # Perform filtered query using SQLAlchemy
+    results = query_recipes_db(
+        query=query,
+        max_prep_time=max_prep_time,
+        max_cook_time=max_cook_time,
+    )
 
-        # Filter by prep time
-        if max_prep_time is not None and recipe["prep_time"] > max_prep_time:
-            continue
-
-        # Filter by cook time
-        if max_cook_time is not None and recipe["cook_time"] > max_cook_time:
-            continue
-
-        # Filter by dietary tags
-        tags = [t.lower() for t in recipe["dietary_tags"]]
+    filtered_recipes = []
+    for recipe in results:
+        # Filter by dietary tags in Python
+        tags = [t.lower() for t in recipe.dietary_tags]
         match_failed = False
         for restriction in active_restrictions:
             if restriction not in tags:
@@ -83,9 +76,10 @@ def get_recipes(
         if match_failed:
             continue
 
-        results.append(recipe)
+        # Convert RecipeModel to dictionary for tool return
+        filtered_recipes.append(recipe.model_dump())
 
-    return {"status": "success", "recipes": results}
+    return {"status": "success", "recipes": filtered_recipes}
 
 
 def set_user_preferences(
@@ -170,7 +164,7 @@ def search_and_add_recipes(
         recipe = fetch_and_parse_recipe(url)
         if recipe:
             if insert_recipe(recipe):
-                added.append(recipe["name"])
+                added.append(recipe.name)
 
     if added:
         return {

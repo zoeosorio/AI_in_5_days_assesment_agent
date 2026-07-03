@@ -16,9 +16,19 @@ import html
 import json
 import os
 import re
-import sqlite3
 import urllib.request
-from typing import Any
+
+from pydantic import BaseModel, Field
+from sqlalchemy import (
+    Integer,
+    String,
+    Text,
+    and_,
+    create_engine,
+    or_,
+    select,
+)
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "recipes.db")
 
@@ -30,8 +40,53 @@ RECIPE_URLS = [
 ]
 
 
-def fetch_and_parse_recipe(url: str) -> dict[str, Any] | None:
-    """Fetches a recipe page from Nigella.com and parses it into a dictionary."""
+# Pydantic Schema Model
+class RecipeModel(BaseModel):
+    name: str = Field(..., description="The name of the recipe.")
+    description: str = Field(
+        ..., description="A short, evocative description of the dish."
+    )
+    prep_time: int = Field(..., description="Preparation time in minutes.")
+    cook_time: int = Field(..., description="Cooking time in minutes.")
+    equipment: list[str] = Field(
+        default_factory=list, description="List of kitchen equipment required."
+    )
+    ingredients: list[str] = Field(
+        default_factory=list, description="List of ingredients needed."
+    )
+    dietary_tags: list[str] = Field(
+        default_factory=list,
+        description="Dietary tags (e.g. 'vegetarian', 'gluten-free').",
+    )
+    instructions: str = Field(..., description="Step-by-step cooking instructions.")
+
+
+# SQLAlchemy Configuration
+DATABASE_URL = f"sqlite:///{DB_PATH}"
+engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+class Recipe(Base):
+    __tablename__ = "recipes"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    prep_time: Mapped[int] = mapped_column(Integer, nullable=False)
+    cook_time: Mapped[int] = mapped_column(Integer, nullable=False)
+    equipment: Mapped[str] = mapped_column(Text, nullable=False)
+    ingredients: Mapped[str] = mapped_column(Text, nullable=False)
+    dietary_tags: Mapped[str] = mapped_column(Text, nullable=False)
+    instructions: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+def fetch_and_parse_recipe(url: str) -> RecipeModel | None:
+    """Fetches a recipe page from Nigella.com and parses it into a RecipeModel."""
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
         with urllib.request.urlopen(req) as response:
@@ -110,122 +165,118 @@ def fetch_and_parse_recipe(url: str) -> dict[str, Any] | None:
     elif "Linguine" in name:
         equipment = ["pot", "knife", "large bowl"]
 
-    return {
-        "name": name,
-        "description": description,
-        "prep_time": prep_time,
-        "cook_time": cook_time,
-        "equipment": equipment,
-        "ingredients": ingredients,
-        "dietary_tags": tags,
-        "instructions": instructions_text,
-    }
+    try:
+        return RecipeModel(
+            name=name,
+            description=description,
+            prep_time=prep_time,
+            cook_time=cook_time,
+            equipment=equipment,
+            ingredients=ingredients,
+            dietary_tags=tags,
+            instructions=instructions_text,
+        )
+    except Exception:
+        return None
 
 
 def init_db() -> None:
     """Initializes the SQLite database and dynamically seeds recipes from Nigella.com."""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS recipes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT UNIQUE,
-            description TEXT,
-            prep_time INTEGER,
-            cook_time INTEGER,
-            equipment TEXT,
-            ingredients TEXT,
-            dietary_tags TEXT,
-            instructions TEXT
-        )
-    """)
+    Base.metadata.create_all(bind=engine)
 
-    # Check if database is already seeded
-    cursor.execute("SELECT COUNT(*) FROM recipes")
-    if cursor.fetchone()[0] == 0:
-        for url in RECIPE_URLS:
-            recipe = fetch_and_parse_recipe(url)
-            if recipe:
-                try:
-                    cursor.execute(
-                        """
-                        INSERT OR IGNORE INTO recipes
-                        (name, description, prep_time, cook_time, equipment, ingredients, dietary_tags, instructions)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                        (
-                            recipe["name"],
-                            recipe["description"],
-                            recipe["prep_time"],
-                            recipe["cook_time"],
-                            json.dumps(recipe["equipment"]),
-                            json.dumps(recipe["ingredients"]),
-                            json.dumps(recipe["dietary_tags"]),
-                            recipe["instructions"],
-                        ),
-                    )
-                except sqlite3.Error:
-                    pass
-    conn.commit()
-    conn.close()
+    session = SessionLocal()
+    try:
+        count = session.query(Recipe).count()
+        if count == 0:
+            for url in RECIPE_URLS:
+                recipe = fetch_and_parse_recipe(url)
+                if recipe:
+                    try:
+                        db_recipe = Recipe(
+                            name=recipe.name,
+                            description=recipe.description,
+                            prep_time=recipe.prep_time,
+                            cook_time=recipe.cook_time,
+                            equipment=json.dumps(recipe.equipment),
+                            ingredients=json.dumps(recipe.ingredients),
+                            dietary_tags=json.dumps(recipe.dietary_tags),
+                            instructions=recipe.instructions,
+                        )
+                        session.add(db_recipe)
+                    except Exception:
+                        pass
+            session.commit()
+    except Exception:
+        session.rollback()
+    finally:
+        session.close()
 
 
-def get_all_recipes() -> list[dict[str, Any]]:
-    """Retrieves all recipes from the database."""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT name, description, prep_time, cook_time, equipment, ingredients, dietary_tags, instructions FROM recipes"
-    )
-    rows = cursor.fetchall()
-    conn.close()
+def query_recipes_db(
+    query: str | None = None,
+    max_prep_time: int | None = None,
+    max_cook_time: int | None = None,
+) -> list[RecipeModel]:
+    """Queries the SQLite database using SQLAlchemy and returns matching RecipeModel list."""
+    session = SessionLocal()
+    try:
+        stmt = select(Recipe)
+        conditions = []
+        if query:
+            q = f"%{query}%"
+            conditions.append(or_(Recipe.name.like(q), Recipe.description.like(q)))
+        if max_prep_time is not None:
+            conditions.append(Recipe.prep_time <= max_prep_time)
+        if max_cook_time is not None:
+            conditions.append(Recipe.cook_time <= max_cook_time)
 
-    results = []
-    for row in rows:
-        results.append(
-            {
-                "name": row[0],
-                "description": row[1],
-                "prep_time": row[2],
-                "cook_time": row[3],
-                "equipment": json.loads(row[4]),
-                "ingredients": json.loads(row[5]),
-                "dietary_tags": json.loads(row[6]),
-                "instructions": row[7],
-            }
-        )
-    return results
+        if conditions:
+            stmt = stmt.where(and_(*conditions))
+
+        results = session.execute(stmt).scalars().all()
+
+        recipes = []
+        for r in results:
+            recipes.append(
+                RecipeModel(
+                    name=r.name,
+                    description=r.description,
+                    prep_time=r.prep_time,
+                    cook_time=r.cook_time,
+                    equipment=json.loads(r.equipment),
+                    ingredients=json.loads(r.ingredients),
+                    dietary_tags=json.loads(r.dietary_tags),
+                    instructions=r.instructions,
+                )
+            )
+        return recipes
+    finally:
+        session.close()
 
 
-def insert_recipe(recipe: dict[str, Any]) -> bool:
-    """Inserts a single recipe into the database. Returns True if inserted, False otherwise."""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
+def insert_recipe(recipe: RecipeModel) -> bool:
+    """Inserts a single RecipeModel into the database. Returns True if inserted, False otherwise."""
+    session = SessionLocal()
     success = False
     try:
-        cursor.execute(
-            """
-            INSERT OR IGNORE INTO recipes
-            (name, description, prep_time, cook_time, equipment, ingredients, dietary_tags, instructions)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-            (
-                recipe["name"],
-                recipe["description"],
-                recipe["prep_time"],
-                recipe["cook_time"],
-                json.dumps(recipe["equipment"]),
-                json.dumps(recipe["ingredients"]),
-                json.dumps(recipe["dietary_tags"]),
-                recipe["instructions"],
-            ),
+        db_recipe = Recipe(
+            name=recipe.name,
+            description=recipe.description,
+            prep_time=recipe.prep_time,
+            cook_time=recipe.cook_time,
+            equipment=json.dumps(recipe.equipment),
+            ingredients=json.dumps(recipe.ingredients),
+            dietary_tags=json.dumps(recipe.dietary_tags),
+            instructions=recipe.instructions,
         )
-        if cursor.rowcount > 0:
+        session.add(db_recipe)
+        session.commit()
+        if db_recipe.id is not None:
             success = True
-    except sqlite3.Error:
-        pass
-    conn.commit()
-    conn.close()
+    except Exception:
+        session.rollback()
+    finally:
+        session.close()
     return success
 
 
