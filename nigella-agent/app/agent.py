@@ -13,8 +13,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import logging
+import sys
+
+# Configure standard structured logging for cloud/local trace logs ingestion
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)],
+)
+
 import re
 from typing import Optional
+
 
 from google.adk.agents import Agent
 from google.adk.agents.invocation_context import InvocationContext

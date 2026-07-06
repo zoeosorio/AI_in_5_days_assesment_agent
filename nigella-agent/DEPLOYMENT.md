@@ -92,9 +92,22 @@ agents-cli run \
 
 ---
 
-## 📊 Observability & Logs
+## 📊 Observability & Distributed Tracing
+
+This ADK agent includes built-in OpenTelemetry instrumentation and structured logging:
+
+### 1. Cloud Trace (Distributed Tracing)
+* **Vertex AI Reasoning Engine**: Distributed tracing is automatically configured and enabled when you deploy. Execution flows (agent runs, LLM calls, and tool calls) are exported as OpenTelemetry spans directly to GCP Cloud Trace.
+* **Local Testing**: To export traces to Cloud Trace when executing commands locally, add the `--trace-to-cloud` flag to the run command:
+  ```bash
+  GOOGLE_GENAI_USE_VERTEXAI=True agents-cli run "Hi Nigella, what should I cook tonight?" --trace-to-cloud
+  ```
+
+### 2. Structured Cloud Logging
+Standard Python logs output to `stdout` are automatically captured by GCP and routed to Cloud Logging.
 
 To check runtime logs or trace errors:
-1. Open the [Google Cloud Console](https://console.cloud.google.com).
+1. Open the [GCP Console Log Explorer](https://console.cloud.google.com/logs).
 2. Go to **Logging > Logs Explorer**.
-3. Filter by the resource type `Vertex AI Reasoning Engine` (or search for trace logs matching your project id).
+3. Filter by the resource type `Vertex AI Reasoning Engine` (or search for logs matching your project id).
+4. For trace details, view the [GCP Trace Explorer](https://console.cloud.google.com/gcloud/trace) to inspect latencies and span call trees.
