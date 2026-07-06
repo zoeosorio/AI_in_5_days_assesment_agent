@@ -13,15 +13,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import logging
 import sys
+from loguru import logger
 
-# Configure standard structured logging for cloud/local trace logs ingestion
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)],
-)
+# Configure Loguru to export structured JSON logs to stdout
+logger.remove()
+logger.add(sys.stdout, level="INFO", serialize=True)
 
 import re
 from typing import Optional

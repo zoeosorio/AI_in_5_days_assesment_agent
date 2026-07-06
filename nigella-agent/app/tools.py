@@ -14,16 +14,14 @@
 
 import html
 import json
-import logging
 import re
 import urllib.request
 
 from google import genai
 from google.adk.tools import ToolContext
 from google.genai import types
+from loguru import logger
 from pydantic import BaseModel, Field
-
-logger = logging.getLogger("app.tools")
 
 
 # Recipe Summary Model (Optimized to keep agent context lightweight during search)
