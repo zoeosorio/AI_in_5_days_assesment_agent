@@ -269,10 +269,6 @@ def get_user_preferences(tool_context: ToolContext) -> GetUserPreferencesOutput:
     return output
 
 
-class _URLList(BaseModel):
-    urls: list[str]
-
-
 def search_nigella_web_recipes(query: str, max_results: int = 1) -> SearchRecipesOutput:
     """Searches Nigella.com for recipes matching the query and returns their summaries.
 
@@ -306,13 +302,13 @@ def search_nigella_web_recipes(query: str, max_results: int = 1) -> SearchRecipe
             contents=prompt,
             config=types.GenerateContentConfig(
                 tools=[{"google_search": {}}],
-                response_mime_type="application/json",
-                response_schema=_URLList,
             ),
         )
-        urls = (
-            response.parsed.urls if (response.parsed and response.parsed.urls) else []
-        )
+        text = response.text or ""
+        # Find all matching urls in generated text
+        found_urls = re.findall(r"https://www.nigella.com/recipes/[a-zA-Z0-9-]+", text)
+        # Deduplicate and limit
+        urls = list(dict.fromkeys(found_urls))[:max_results]
     except Exception as e:
         logger.error(
             json.dumps(

@@ -100,7 +100,6 @@ Follow these guidelines:
 8. If you are unsure of the user's active dietary restrictions, or if they have not been specified yet, you MUST call the 'request_input' tool to clarify their dietary preferences before suggesting any specific dishes.
 """,
     tools=[
-        google_search,
         AgentTool(sous_chef),
         set_user_preferences,
         get_user_preferences,
