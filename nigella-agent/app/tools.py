@@ -26,34 +26,51 @@ from pydantic import BaseModel, Field
 logger = logging.getLogger("app.tools")
 
 
-# Strict Pydantic Schema Model for Recipe
-class RecipeModel(BaseModel):
+# Recipe Summary Model (Optimized to keep agent context lightweight during search)
+class RecipeSummary(BaseModel):
     name: str = Field(..., description="The name of the recipe.")
     description: str = Field(
         ..., description="A short, evocative description of the dish."
     )
     prep_time: int = Field(..., description="Preparation time in minutes.")
     cook_time: int = Field(..., description="Cooking time in minutes.")
-    equipment: list[str] = Field(
-        default_factory=list, description="List of kitchen equipment required."
-    )
-    ingredients: list[str] = Field(
-        default_factory=list, description="List of ingredients needed."
-    )
     dietary_tags: list[str] = Field(
         default_factory=list,
         description="Dietary tags (e.g. 'vegetarian', 'gluten-free').",
     )
+    url: str = Field(
+        ..., description="The direct URL of the recipe page on Nigella.com."
+    )
+
+
+# Recipe Detail Model (Retrieved only when the user chooses to cook the recipe)
+class RecipeDetail(BaseModel):
+    name: str = Field(..., description="The name of the recipe.")
+    ingredients: list[str] = Field(
+        default_factory=list, description="List of ingredients needed."
+    )
     instructions: str = Field(..., description="Step-by-step cooking instructions.")
+    equipment: list[str] = Field(
+        default_factory=list, description="List of kitchen equipment required."
+    )
 
 
 # Strict Output Schemas
-class GetRecipesOutput(BaseModel):
+class SearchRecipesOutput(BaseModel):
     status: str = Field(
         ..., description="The status of the operation (e.g. 'success')."
     )
-    recipes: list[RecipeModel] = Field(
-        ..., description="A list of matching recipe models."
+    recipes: list[RecipeSummary] = Field(
+        ..., description="A list of matching recipe summaries."
+    )
+
+
+class GetRecipeDetailsOutput(BaseModel):
+    status: str = Field(
+        ..., description="The status of the operation (e.g. 'success')."
+    )
+    detail: RecipeDetail = Field(
+        ..., description="The ingredients and instructions details of the recipe."
     )
 
 
@@ -76,8 +93,8 @@ class GetUserPreferencesOutput(BaseModel):
     )
 
 
-def fetch_and_parse_recipe(url: str) -> RecipeModel | None:
-    """Fetches a recipe page from Nigella.com and parses it into a RecipeModel."""
+def fetch_and_parse_recipe(url: str) -> tuple[RecipeSummary, RecipeDetail] | None:
+    """Fetches a recipe page from Nigella.com and parses it into Summary and Detail models."""
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
         with urllib.request.urlopen(req) as response:
@@ -157,16 +174,21 @@ def fetch_and_parse_recipe(url: str) -> RecipeModel | None:
         equipment = ["pot", "knife", "large bowl"]
 
     try:
-        return RecipeModel(
+        summary = RecipeSummary(
             name=name,
             description=description,
             prep_time=prep_time,
             cook_time=cook_time,
-            equipment=equipment,
-            ingredients=ingredients,
             dietary_tags=tags,
-            instructions=instructions_text,
+            url=url,
         )
+        detail = RecipeDetail(
+            name=name,
+            ingredients=ingredients,
+            instructions=instructions_text,
+            equipment=equipment,
+        )
+        return summary, detail
     except Exception:
         return None
 
@@ -251,15 +273,15 @@ class _URLList(BaseModel):
     urls: list[str]
 
 
-def search_nigella_web_recipes(query: str, max_results: int = 1) -> GetRecipesOutput:
-    """Searches Nigella.com for recipes matching the query and returns the parsed recipes directly.
+def search_nigella_web_recipes(query: str, max_results: int = 1) -> SearchRecipesOutput:
+    """Searches Nigella.com for recipes matching the query and returns their summaries.
 
     Args:
         query: The search query (e.g. 'lemon cake', 'chocolate cookies').
         max_results: The maximum number of recipe matches to return. Default is 1.
 
     Returns:
-        A structured GetRecipesOutput.
+        A structured SearchRecipesOutput.
     """
     # Log Intent
     logger.info(
@@ -302,16 +324,19 @@ def search_nigella_web_recipes(query: str, max_results: int = 1) -> GetRecipesOu
                 }
             )
         )
-        return GetRecipesOutput(status="error", recipes=[])
+        return SearchRecipesOutput(status="error", recipes=[])
 
-    recipes = []
+    summaries = []
     if urls:
         for url in urls:
-            recipe = fetch_and_parse_recipe(url)
-            if recipe:
-                recipes.append(recipe)
+            parsed = fetch_and_parse_recipe(url)
+            if parsed:
+                summary, _ = parsed
+                summaries.append(summary)
 
-    output = GetRecipesOutput(status="success" if recipes else "empty", recipes=recipes)
+    output = SearchRecipesOutput(
+        status="success" if summaries else "empty", recipes=summaries
+    )
 
     # Log Outcome
     logger.info(
@@ -320,7 +345,56 @@ def search_nigella_web_recipes(query: str, max_results: int = 1) -> GetRecipesOu
                 "event": "tool_outcome",
                 "tool": "search_nigella_web_recipes",
                 "status": "success",
-                "recipes_count": len(recipes),
+                "recipes_count": len(summaries),
+            }
+        )
+    )
+
+    return output
+
+
+def get_recipe_details(url: str) -> GetRecipeDetailsOutput:
+    """Fetches the full ingredients and step-by-step instructions for a recipe by its URL.
+
+    Args:
+        url: The direct URL of the recipe page on Nigella.com.
+
+    Returns:
+        A structured GetRecipeDetailsOutput containing detailed instructions.
+    """
+    # Log Intent
+    logger.info(
+        json.dumps(
+            {
+                "event": "tool_intent",
+                "tool": "get_recipe_details",
+                "params": {"url": url},
+            }
+        )
+    )
+
+    parsed = fetch_and_parse_recipe(url)
+    if parsed:
+        _, detail = parsed
+        output = GetRecipeDetailsOutput(status="success", detail=detail)
+    else:
+        output = GetRecipeDetailsOutput(
+            status="error",
+            detail=RecipeDetail(
+                name="Unknown",
+                ingredients=[],
+                instructions="Failed to fetch instructions. Please verify the URL and your network connection.",
+                equipment=[],
+            ),
+        )
+
+    # Log Outcome
+    logger.info(
+        json.dumps(
+            {
+                "event": "tool_outcome",
+                "tool": "get_recipe_details",
+                "status": output.status,
             }
         )
     )

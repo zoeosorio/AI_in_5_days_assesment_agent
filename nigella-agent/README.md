@@ -1,6 +1,6 @@
 # "What Would Nigella Do?" Cooking Assistant
 
-This is an agentic cooking assistant that speaks in the warm, intimate, and celebrated voice of Nigella Lawson. It helps users decide what to cook tonight by searching a local database of favorites, dynamically importing new recipes from Nigella's website, and remembering user dietary preferences.
+This is an agentic cooking assistant that speaks in the warm, intimate, and celebrated voice of Nigella Lawson. It helps users decide what to cook tonight by dynamically searching and parsing recipes directly from Nigella.com, all while remembering user dietary preferences.
 
 ---
 
@@ -10,16 +10,13 @@ This is an agentic cooking assistant that speaks in the warm, intimate, and cele
 nigella-agent/
 ├── app/
 │   ├── agent.py         # Root Nigella agent & Sous Chef sub-agent configuration
-│   ├── database.py      # SQLAlchemy DB schema, parser, and SQLite helper operations
-│   ├── tools.py         # Exposed ADK tools (recipe query, session state preferences)
-│   ├── fast_api_app.py  # FastAPI backend server
-│   └── app_utils/       # App utilities and session lifecycle hooks
+│   └── tools.py         # Exposed ADK tools (web scraper, preferences store)
 ├── tests/               # Unit, integration, and evaluation suites
 ├── AGENTS.md            # Comprehensive developer and architecture guide
 └── pyproject.toml       # Project configuration and package dependencies
 ```
 
-> 💡 **Tip:** Detailed architectural patterns, Pydantic/SQLAlchemy schemas, and developer workflows are fully documented in [AGENTS.md](file:///usr/local/google/home/zoeo/Projects/jetski-cli-projects/AI_in_5_days_assesment_agent/nigella-agent/AGENTS.md).
+> 💡 **Tip:** Detailed architectural patterns, Pydantic validation schemas, and developer workflows are fully documented in [AGENTS.md](file:///usr/local/google/home/zoeo/Projects/jetski-cli-projects/AI_in_5_days_assesment_agent/nigella-agent/AGENTS.md).
 
 ---
 
@@ -27,9 +24,10 @@ nigella-agent/
 
 * **Warm, Sensuous Voice**: Captures Nigella Lawson's unique personality using LLM-as-judge voice fidelity testing.
 * **Separation of Voice & Detail**: Uses an `AgentTool` multi-agent delegation structure so that the backend `sous_chef` processes raw data while Nigella remains in full control of the conversational persona.
-* **Zero-Bloat Database**: No recipe text is committed to the repository. The SQLite database is created and seeded dynamically on first import by scraping recipe pages directly from Nigella.com.
-* **Dynamic Search & Ingestion**: The agent can search Nigella.com using Google Search grounding, extract, parse, validate (via Pydantic), and insert new recipes into SQLite at runtime.
-* **Persistent Session State**: Remembers user dietary restrictions across multiple turns using shared session memory.
+* **Zero-Repository Bloat**: No recipe content or databases are stored locally or in the repository. All recipes are dynamically fetched, parsed, and validated in memory using Pydantic at query runtime.
+* **Conversational Human-in-the-Loop**: Nigella uses the built-in `request_input` tool to ask the user to clarify or confirm their dietary preferences whenever they are unspecified or unsure before suggesting recipes.
+* **Dynamic Search & Ingestion**: The agent searches Nigella.com using Google Search grounding, extracts and parses matching recipe pages, and validates them (via Pydantic) at runtime.
+* **Persistent Session State**: Remembers user dietary restrictions across multiple turns using shared session state.
 
 ---
 
@@ -46,12 +44,22 @@ agents-cli install
 ```
 
 ### 2. Run the Playground
-Launch the interactive web UI to test and converse with Nigella:
+Launch the interactive native ADK web UI to test and converse with Nigella:
 ```bash
 agents-cli playground
 ```
 
-### 3. Run Quality Evaluations
+### 3. Run the CLI Debugger
+Query the agent directly from the command line using a single prompt:
+```bash
+# Run initial request (starts a background server for session tracking)
+agents-cli run "Hi Nigella, could you recommend a slow roasted chicken recipe?"
+
+# Resume/Continue the conversation using session ID
+agents-cli run "No, I don't have any dietary restrictions" --session-id <session_id>
+```
+
+### 4. Run Quality Evaluations
 Run the local LLM-as-judge evaluation dataset (compares response quality and voice fidelity):
 ```bash
 agents-cli eval run
@@ -65,5 +73,3 @@ Execute the test suites locally using pytest:
 ```bash
 uv run pytest
 ```
-* **Unit Tests**: Test tools, database operations, and state variables in isolation.
-* **Integration Tests**: Verify end-to-end multi-agent messaging flow (requires a valid `GEMINI_API_KEY` or active Google Cloud CLI ADC credentials).
