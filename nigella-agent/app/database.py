@@ -13,24 +13,11 @@
 # limitations under the License.
 
 import html
-import json
-import os
 import re
 import urllib.request
 
+from google.cloud import firestore
 from pydantic import BaseModel, Field
-from sqlalchemy import (
-    Integer,
-    String,
-    Text,
-    and_,
-    create_engine,
-    or_,
-    select,
-)
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
-
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "recipes.db")
 
 RECIPE_URLS = [
     "https://www.nigella.com/recipes/slow-roasted-garlic-and-lemon-chicken",
@@ -40,7 +27,6 @@ RECIPE_URLS = [
 ]
 
 
-# Pydantic Schema Model
 class RecipeModel(BaseModel):
     name: str = Field(..., description="The name of the recipe.")
     description: str = Field(
@@ -61,28 +47,8 @@ class RecipeModel(BaseModel):
     instructions: str = Field(..., description="Step-by-step cooking instructions.")
 
 
-# SQLAlchemy Configuration
-DATABASE_URL = f"sqlite:///{DB_PATH}"
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-
-class Base(DeclarativeBase):
-    pass
-
-
-class Recipe(Base):
-    __tablename__ = "recipes"
-
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    name: Mapped[str] = mapped_column(String, unique=True, nullable=False)
-    description: Mapped[str] = mapped_column(Text, nullable=False)
-    prep_time: Mapped[int] = mapped_column(Integer, nullable=False)
-    cook_time: Mapped[int] = mapped_column(Integer, nullable=False)
-    equipment: Mapped[str] = mapped_column(Text, nullable=False)
-    ingredients: Mapped[str] = mapped_column(Text, nullable=False)
-    dietary_tags: Mapped[str] = mapped_column(Text, nullable=False)
-    instructions: Mapped[str] = mapped_column(Text, nullable=False)
+# Initialize Firestore client (synchronous for tools execution compatibility)
+db = firestore.Client()
 
 
 def fetch_and_parse_recipe(url: str) -> RecipeModel | None:
@@ -116,7 +82,7 @@ def fetch_and_parse_recipe(url: str) -> RecipeModel | None:
         if "vegetarian" in kw_str:
             tags.append("vegetarian")
 
-    # Extract Ingredients (Metric list is inside switcher)
+    # Extract Ingredients
     ingredients = []
     metric_part_match = re.search(
         r'<div class="part switchable" data-switcher-type="Metric"[^>]*>.*?<ul>(.*?)</ul>',
@@ -130,7 +96,7 @@ def fetch_and_parse_recipe(url: str) -> RecipeModel | None:
         )
         ingredients = [html.unescape(li.strip()) for li in li_matches]
 
-    # Extract Instructions (Metric)
+    # Extract Instructions
     instructions_text = ""
     instructions_match = re.search(
         r'<div class="switchable" data-switcher-type="Metric"[^>]*itemprop="recipeInstructions">.*?<ol>(.*?)</ol>',
@@ -181,35 +147,18 @@ def fetch_and_parse_recipe(url: str) -> RecipeModel | None:
 
 
 def init_db() -> None:
-    """Initializes the SQLite database and dynamically seeds recipes from Nigella.com."""
-    Base.metadata.create_all(bind=engine)
-
-    session = SessionLocal()
+    """Initializes the Firestore database and dynamically seeds recipes if the collection is empty."""
     try:
-        count = session.query(Recipe).count()
-        if count == 0:
+        recipes_ref = db.collection("recipes")
+        docs = list(recipes_ref.limit(1).stream())
+        if not docs:
+            print("Database empty, seeding 4 recipes from Nigella.com...")
             for url in RECIPE_URLS:
                 recipe = fetch_and_parse_recipe(url)
                 if recipe:
-                    try:
-                        db_recipe = Recipe(
-                            name=recipe.name,
-                            description=recipe.description,
-                            prep_time=recipe.prep_time,
-                            cook_time=recipe.cook_time,
-                            equipment=json.dumps(recipe.equipment),
-                            ingredients=json.dumps(recipe.ingredients),
-                            dietary_tags=json.dumps(recipe.dietary_tags),
-                            instructions=recipe.instructions,
-                        )
-                        session.add(db_recipe)
-                    except Exception:
-                        pass
-            session.commit()
-    except Exception:
-        session.rollback()
-    finally:
-        session.close()
+                    insert_recipe(recipe)
+    except Exception as e:
+        print(f"Error seeding Firestore: {e}")
 
 
 def query_recipes_db(
@@ -217,68 +166,46 @@ def query_recipes_db(
     max_prep_time: int | None = None,
     max_cook_time: int | None = None,
 ) -> list[RecipeModel]:
-    """Queries the SQLite database using SQLAlchemy and returns matching RecipeModel list."""
-    session = SessionLocal()
+    """Queries Firestore and returns matching RecipeModel list."""
     try:
-        stmt = select(Recipe)
-        conditions = []
-        if query:
-            q = f"%{query}%"
-            conditions.append(or_(Recipe.name.like(q), Recipe.description.like(q)))
+        ref = db.collection("recipes")
         if max_prep_time is not None:
-            conditions.append(Recipe.prep_time <= max_prep_time)
-        if max_cook_time is not None:
-            conditions.append(Recipe.cook_time <= max_cook_time)
-
-        if conditions:
-            stmt = stmt.where(and_(*conditions))
-
-        results = session.execute(stmt).scalars().all()
-
-        recipes = []
-        for r in results:
-            recipes.append(
-                RecipeModel(
-                    name=r.name,
-                    description=r.description,
-                    prep_time=r.prep_time,
-                    cook_time=r.cook_time,
-                    equipment=json.loads(r.equipment),
-                    ingredients=json.loads(r.ingredients),
-                    dietary_tags=json.loads(r.dietary_tags),
-                    instructions=r.instructions,
-                )
+            ref = ref.where(
+                filter=firestore.FieldFilter("prep_time", "<=", max_prep_time)
             )
+        if max_cook_time is not None:
+            ref = ref.where(
+                filter=firestore.FieldFilter("cook_time", "<=", max_cook_time)
+            )
+
+        docs = ref.stream()
+        recipes = []
+        for doc in docs:
+            data = doc.to_dict()
+            recipe = RecipeModel(**data)
+            if query:
+                q = query.lower()
+                if q not in recipe.name.lower() and q not in recipe.description.lower():
+                    continue
+            recipes.append(recipe)
         return recipes
-    finally:
-        session.close()
+    except Exception as e:
+        print(f"Error querying Firestore: {e}")
+        return []
 
 
 def insert_recipe(recipe: RecipeModel) -> bool:
-    """Inserts a single RecipeModel into the database. Returns True if inserted, False otherwise."""
-    session = SessionLocal()
-    success = False
+    """Inserts a single RecipeModel into Firestore recipes collection. Returns True if successful."""
     try:
-        db_recipe = Recipe(
-            name=recipe.name,
-            description=recipe.description,
-            prep_time=recipe.prep_time,
-            cook_time=recipe.cook_time,
-            equipment=json.dumps(recipe.equipment),
-            ingredients=json.dumps(recipe.ingredients),
-            dietary_tags=json.dumps(recipe.dietary_tags),
-            instructions=recipe.instructions,
-        )
-        session.add(db_recipe)
-        session.commit()
-        if db_recipe.id is not None:
-            success = True
-    except Exception:
-        session.rollback()
-    finally:
-        session.close()
-    return success
+        # Create a document ID based on lowercase recipe name to prevent duplicates
+        doc_id = re.sub(r"[^a-zA-Z0-9]+", "-", recipe.name.lower()).strip("-")
+        doc_ref = db.collection("recipes").document(doc_id)
+        doc_ref.set(recipe.model_dump())
+        return True
+    except Exception as e:
+        print(f"Error inserting into Firestore: {e}")
+        return False
 
 
-# Run DB initialization when module is imported
+# Seeding database
 init_db()

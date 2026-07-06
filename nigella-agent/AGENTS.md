@@ -12,7 +12,7 @@ The agent is designed as a ReAct multi-agent hierarchy to preserve the strict pe
 graph TD
     User([User]) <--> Root[Nigella Voice Agent (Root)]
     Root <--> |AgentTool| SousChef[Sous Chef Agent]
-    SousChef <--> DB[(SQLite Database)]
+    SousChef <--> DB[(Google Cloud Firestore)]
     SousChef <--> Web[Nigella.com / Google Search]
 ```
 
@@ -24,40 +24,39 @@ graph TD
 
 ### 2. Sous Chef Agent (Sub-agent)
 * **Role**: Precise, detail-oriented backend assistant.
-* **Responsibility**: Queries the recipe database, handles SQLAlchemy filter operations, and performs dynamic web scraping of recipe pages.
+* **Responsibility**: Queries the recipe database and performs dynamic web scraping of recipe pages.
 * **Tools**: `get_recipes`, `search_and_add_recipes`.
 
 ---
 
 ## 💾 Data Architecture & Schema
 
-We use **SQLAlchemy** to define the database schema and **Pydantic** to validate all parsed and imported recipe payloads.
+We use **Google Cloud Firestore** as a serverless database to store session history and the recipe catalog, and **Pydantic** to validate all parsed and imported recipe payloads.
 
-### Recipe Data Schema
+### Recipe Document Schema
 
-The database table `recipes` contains the following fields:
+The recipe documents are stored in the `recipes` collection and contain the following fields:
 
 | Field | Type | Description | Validation (Pydantic) |
 |---|---|---|---|
-| `id` | INTEGER | Primary Key (Autoincrement) | - |
-| `name` | VARCHAR | Unique recipe title | `name: str` |
-| `description` | TEXT | Short, sensory description | `description: str` |
-| `prep_time` | INTEGER | Prep duration in minutes | `prep_time: int` |
-| `cook_time` | INTEGER | Cook duration in minutes | `cook_time: int` |
-| `equipment` | TEXT | JSON list of kitchen tools | `equipment: list[str]` |
-| `ingredients` | TEXT | JSON list of ingredients | `ingredients: list[str]` |
-| `dietary_tags` | TEXT | JSON list of tags (e.g., 'vegetarian') | `dietary_tags: list[str]` |
-| `instructions` | TEXT | Step-by-step instructions | `instructions: str` |
+| `name` | string | Unique recipe title | `name: str` |
+| `description` | string | Short, sensory description | `description: str` |
+| `prep_time` | integer | Prep duration in minutes | `prep_time: int` |
+| `cook_time` | integer | Cook duration in minutes | `cook_time: int` |
+| `equipment` | array | List of kitchen tools | `equipment: list[str]` |
+| `ingredients` | array | List of ingredients | `ingredients: list[str]` |
+| `dietary_tags` | array | List of tags (e.g., 'vegetarian') | `dietary_tags: list[str]` |
+| `instructions` | string | Step-by-step instructions | `instructions: str` |
 
 ---
 
 ## 🔌 Core Capabilities & Custom Tools
 
 ### 1. Dynamic Web Ingestion
-No recipe data is hardcoded or committed to the repository to prevent bloat. On first startup, the database is dynamically initialized at [`app/recipes.db`](file:///usr/local/google/home/zoeo/Projects/jetski-cli-projects/AI_in_5_days_assesment_agent/nigella-agent/app/recipes.db) by scraping four seed recipes from Nigella.com.
+No recipe data is hardcoded or committed to the repository. On first startup, the Firestore collection `recipes` is dynamically seeded by scraping four recipes from Nigella.com.
 
 ### 2. Search & Import Tool (`search_and_add_recipes`)
-Exposed to the `sous_chef`, this tool allows the agent to dynamically search for new recipes on Nigella.com using Google Search grounding, download the HTML, parse out ingredients and instructions, validate them using the `RecipeModel` Pydantic class, and save them directly to the SQLite database.
+Exposed to the `sous_chef`, this tool allows the agent to dynamically search for new recipes on Nigella.com using Google Search grounding, download the HTML, parse out ingredients and instructions, validate them using the `RecipeModel` Pydantic class, and save them directly to Google Cloud Firestore.
 
 ### 3. Session State Preference Store
 User dietary preferences are persisted across turns using the `tool_context.state` dictionary.

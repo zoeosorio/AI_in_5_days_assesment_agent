@@ -54,9 +54,11 @@ def get_session_service():
             or os.environ.get("GOOGLE_CLOUD_LOCATION"),
             agent_engine_id=agent_engine_id,
         )
-    from google.adk.sessions.in_memory_session_service import InMemorySessionService
+    from google.adk.integrations.firestore.firestore_session_service import (
+        FirestoreSessionService,
+    )
 
-    return InMemorySessionService()
+    return FirestoreSessionService()
 
 
 @functools.cache
