@@ -55,7 +55,8 @@ Scraped recipes are validated against the following schema:
 No recipe data is hardcoded or committed to the repository. The agent fetches and parses recipe content dynamically from Nigella.com at query runtime.
 
 ### 2. Search Tool (`search_nigella_web_recipes`)
-Exposed to the `sous_chef`, this tool allows the agent to dynamically search for recipes on Nigella.com using Google Search grounding, download the HTML, parse out ingredients and instructions, validate them using the `RecipeModel` Pydantic class, and return them to the agent.
+Exposed to the `sous_chef`, this tool allows the agent to dynamically search for recipes on Nigella.com using Google Search grounding, download the HTML, parse out ingredients and instructions, validate them using the `RecipeSummary` and `RecipeDetail` Pydantic classes, and return them directly to the agent.
+
 
 ### 3. Session State Preference Store & Async Backup
 User dietary preferences are persisted across turns using the `tool_context.state` dictionary.
@@ -96,3 +97,28 @@ agents-cli eval run
 This runs custom metrics configured in `tests/eval/eval_config.yaml`:
 * `custom_response_quality`: Evaluates accuracy and recipe instruction coherence.
 * `nigella_voice_fidelity`: Scores the response on how well it captures Nigella Lawson's sensory, intimate voice.
+
+---
+
+## 🌐 GCP Deployment & Production Infrastructure
+
+We package and run the ADK application container on **Vertex AI Agent Runtime (Reasoning Engine)** using standard GCP platform services.
+
+### 1. Container Server Entrypoint
+The agent is packaged via the project's root `Dockerfile`. The entrypoint starts ADK's native click API server with standard A2A routing:
+```bash
+adk api_server --port=8080 --host=0.0.0.0 --a2a --gemini_enterprise_app_name=app app
+```
+
+### 2. Managed State Backend
+Session memory is mapped to Google's cloud-managed state layer. The deployment environment variables set the service URIs to:
+* `session_service_uri=agentengine://` (Vertex AI session manager)
+* `memory_service_uri=agentengine://` (Vertex AI memory database)
+
+This configuration prevents the need to provision, scale, or pay for external SQL instances.
+
+### 3. OpenTelemetry and Trace Export
+The `--otel_to_cloud` CLI flag in the runtime container automatically instruments all agent flows. Spans and metrics are exported directly to:
+* **Google Cloud Trace** (for latency analytics and distributed trace graphs)
+* **Google Cloud Logging** (for structured JSON logs, exported via `loguru`)
+

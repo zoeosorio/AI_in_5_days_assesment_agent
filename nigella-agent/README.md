@@ -65,9 +65,26 @@ Run the local LLM-as-judge evaluation dataset (compares response quality and voi
 agents-cli eval run
 ```
 
+### 5. Deployment & Production Setup
+The assistant is packaged for containerized deployment on **Vertex AI Agent Runtime (Reasoning Engine)**:
+
+* **Production Server**: The container executes the native ADK API server running with the `--a2a` protocol enabled:
+  ```bash
+  adk api_server --port=8080 --host=0.0.0.0 --a2a --gemini_enterprise_app_name=app app
+  ```
+* **Managed Session Persistence**: Uses `agentengine://` (Vertex AI's managed database backend) to automatically persist user preferences between separate runs.
+* **Distributed Tracing & Structured Logging**: Traces and metrics are automatically instrumented and exported directly to Google Cloud Trace and Cloud Logging using the `--otel_to_cloud` flag.
+* **Asynchronous Operations**: Decouples heavy memory operations from user response latency using the `AsyncMemoryBackupPlugin` to back up states in a non-blocking `asyncio.create_task` thread.
+
+To deploy the agent to your Google Cloud Project:
+```bash
+make deploy PROJECT_ID=YOUR_PROJECT_ID
+```
+
 ---
 
 ## 🧪 Testing
+
 
 Execute the test suites locally using pytest:
 ```bash
