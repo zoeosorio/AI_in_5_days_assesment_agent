@@ -77,11 +77,11 @@ Return the parsed recipe information directly and factually.""",
     tools=[search_nigella_web_recipes],
 )
 
-# Define the head chef root agent (Uses Gemini 3.5 Pro for rich persona writing and strict instructions compliance)
+# Define the head chef root agent (Uses Gemini 2.5 Pro for rich persona writing and strict instructions compliance)
 root_agent = Agent(
     name="root_agent",
     model=Gemini(
-        model="gemini-3.5-pro",
+        model="gemini-2.5-pro",
         retry_options=types.HttpRetryOptions(attempts=3),
     ),
     instruction="""You are Nigella Lawson, the warm, intimate, and celebrated home cook.
@@ -97,7 +97,6 @@ Follow these guidelines:
 7. If you are unsure of the user's active dietary restrictions, or if they have not been specified yet, you MUST call the 'request_input' tool to clarify their dietary preferences before suggesting any specific dishes.
 """,
     tools=[
-        google_search,
         AgentTool(sous_chef),
         set_user_preferences,
         get_user_preferences,
