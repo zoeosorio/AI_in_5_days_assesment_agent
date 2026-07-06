@@ -53,44 +53,6 @@ class RecipeDetail(BaseModel):
     )
 
 
-# Strict Output Schemas
-class SearchRecipesOutput(BaseModel):
-    status: str = Field(
-        ..., description="The status of the operation (e.g. 'success')."
-    )
-    recipes: list[RecipeSummary] = Field(
-        ..., description="A list of matching recipe summaries."
-    )
-
-
-class GetRecipeDetailsOutput(BaseModel):
-    status: str = Field(
-        ..., description="The status of the operation (e.g. 'success')."
-    )
-    detail: RecipeDetail = Field(
-        ..., description="The ingredients and instructions details of the recipe."
-    )
-
-
-class SetUserPreferencesOutput(BaseModel):
-    status: str = Field(
-        ..., description="The status of the operation (e.g. 'success')."
-    )
-    message: str = Field(
-        ...,
-        description="A confirmation message or detailed troubleshooting/recovery instructions.",
-    )
-
-
-class GetUserPreferencesOutput(BaseModel):
-    status: str = Field(
-        ..., description="The status of the operation (e.g. 'success')."
-    )
-    dietary_restrictions: list[str] = Field(
-        ..., description="The user's currently stored dietary restrictions."
-    )
-
-
 def fetch_and_parse_recipe(url: str) -> tuple[RecipeSummary, RecipeDetail] | None:
     """Fetches a recipe page from Nigella.com and parses it into Summary and Detail models."""
     try:
@@ -193,14 +155,14 @@ def fetch_and_parse_recipe(url: str) -> tuple[RecipeSummary, RecipeDetail] | Non
 
 def set_user_preferences(
     dietary_restrictions: list[str], tool_context: ToolContext
-) -> SetUserPreferencesOutput:
+) -> str:
     """Saves user dietary restrictions to the persistent user profile.
 
     Args:
         dietary_restrictions: A list of dietary restrictions (e.g., ['vegetarian', 'gluten-free']).
 
     Returns:
-        A structured SetUserPreferencesOutput.
+        A confirmation message string.
     """
     # Log Intent
     logger.info(
@@ -216,12 +178,9 @@ def set_user_preferences(
     clean_restrictions = [r.strip() for r in dietary_restrictions if r.strip()]
     tool_context.state["user:dietary_restrictions"] = clean_restrictions
 
-    output = SetUserPreferencesOutput(
-        status="success",
-        message=(
-            f"Successfully updated your dietary preferences to: {clean_restrictions}. "
-            "To reset or clear your preferences, pass an empty list [] as input."
-        ),
+    message = (
+        f"Successfully updated your dietary preferences to: {clean_restrictions}. "
+        "To reset or clear your preferences, pass an empty list [] as input."
     )
 
     # Log Outcome
@@ -236,21 +195,19 @@ def set_user_preferences(
         )
     )
 
-    return output
+    return message
 
 
-def get_user_preferences(tool_context: ToolContext) -> GetUserPreferencesOutput:
+def get_user_preferences(tool_context: ToolContext) -> list[str]:
     """Retrieves the user's saved dietary preferences.
 
     Returns:
-        A structured GetUserPreferencesOutput.
+        The user's currently stored dietary restrictions list.
     """
     # Log Intent
     logger.info(json.dumps({"event": "tool_intent", "tool": "get_user_preferences"}))
 
     prefs = tool_context.state.get("user:dietary_restrictions", [])
-
-    output = GetUserPreferencesOutput(status="success", dietary_restrictions=prefs)
 
     # Log Outcome
     logger.info(
@@ -264,10 +221,10 @@ def get_user_preferences(tool_context: ToolContext) -> GetUserPreferencesOutput:
         )
     )
 
-    return output
+    return prefs
 
 
-def search_nigella_web_recipes(query: str, max_results: int = 1) -> SearchRecipesOutput:
+def search_nigella_web_recipes(query: str, max_results: int = 1) -> list[RecipeSummary]:
     """Searches Nigella.com for recipes matching the query and returns their summaries.
 
     Args:
@@ -275,7 +232,7 @@ def search_nigella_web_recipes(query: str, max_results: int = 1) -> SearchRecipe
         max_results: The maximum number of recipe matches to return. Default is 1.
 
     Returns:
-        A structured SearchRecipesOutput.
+        A list of matching recipe summaries.
     """
     # Log Intent
     logger.info(
@@ -318,7 +275,7 @@ def search_nigella_web_recipes(query: str, max_results: int = 1) -> SearchRecipe
                 }
             )
         )
-        return SearchRecipesOutput(status="error", recipes=[])
+        return []
 
     summaries = []
     if urls:
@@ -327,10 +284,6 @@ def search_nigella_web_recipes(query: str, max_results: int = 1) -> SearchRecipe
             if parsed:
                 summary, _ = parsed
                 summaries.append(summary)
-
-    output = SearchRecipesOutput(
-        status="success" if summaries else "empty", recipes=summaries
-    )
 
     # Log Outcome
     logger.info(
@@ -344,17 +297,17 @@ def search_nigella_web_recipes(query: str, max_results: int = 1) -> SearchRecipe
         )
     )
 
-    return output
+    return summaries
 
 
-def get_recipe_details(url: str) -> GetRecipeDetailsOutput:
+def get_recipe_details(url: str) -> RecipeDetail:
     """Fetches the full ingredients and step-by-step instructions for a recipe by its URL.
 
     Args:
         url: The direct URL of the recipe page on Nigella.com.
 
     Returns:
-        A structured GetRecipeDetailsOutput containing detailed instructions.
+        A RecipeDetail containing ingredients and instructions.
     """
     # Log Intent
     logger.info(
@@ -370,16 +323,15 @@ def get_recipe_details(url: str) -> GetRecipeDetailsOutput:
     parsed = fetch_and_parse_recipe(url)
     if parsed:
         _, detail = parsed
-        output = GetRecipeDetailsOutput(status="success", detail=detail)
+        status = "success"
+        output = detail
     else:
-        output = GetRecipeDetailsOutput(
-            status="error",
-            detail=RecipeDetail(
-                name="Unknown",
-                ingredients=[],
-                instructions="Failed to fetch instructions. Please verify the URL and your network connection.",
-                equipment=[],
-            ),
+        status = "error"
+        output = RecipeDetail(
+            name="Unknown",
+            ingredients=[],
+            instructions="Failed to fetch instructions. Please verify the URL and your network connection.",
+            equipment=[],
         )
 
     # Log Outcome
@@ -388,7 +340,7 @@ def get_recipe_details(url: str) -> GetRecipeDetailsOutput:
             {
                 "event": "tool_outcome",
                 "tool": "get_recipe_details",
-                "status": output.status,
+                "status": status,
             }
         )
     )
