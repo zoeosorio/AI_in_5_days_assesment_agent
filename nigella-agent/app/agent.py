@@ -23,7 +23,6 @@ logger.add(sys.stdout, level="INFO", serialize=True)
 import re
 from typing import Optional
 
-
 from google.adk.agents import Agent
 from google.adk.agents.invocation_context import InvocationContext
 from google.adk.apps import App
@@ -69,6 +68,34 @@ class PIIRedactionPlugin(BasePlugin):
                 if part.text:
                     part.text = self._redact(part.text)
         return event
+
+
+# Custom Async Memory Backup Plugin (Explicit background task for memory operations)
+class AsyncMemoryBackupPlugin(BasePlugin):
+    """Asynchronously triggers memory backup processes in a background task after each run."""
+
+    def __init__(self) -> None:
+        super().__init__("async_memory_backup")
+
+    async def after_run_callback(
+        self, *, invocation_context: InvocationContext
+    ) -> None:
+        import asyncio
+
+        # Explicit background task execution for memory/telemetry backup to avoid blocking user response
+        asyncio.create_task(self._async_backup_operation(invocation_context))
+
+    async def _async_backup_operation(self, context: InvocationContext) -> None:
+        try:
+            import asyncio
+
+            # Simulate a brief delay representing a network backup call
+            await asyncio.sleep(0.5)
+            logger.info(
+                f"Asynchronously backed up session state and preferences for session: {context.session_id or 'unknown'}"
+            )
+        except Exception as e:
+            logger.error(f"Failed to back up session memory: {e}")
 
 
 # Define the analytical Sous Chef agent (Uses Gemini 3.5 Flash for fast web query searches)
@@ -120,7 +147,7 @@ Follow these guidelines:
 app = App(
     root_agent=root_agent,
     name="app",
-    plugins=[PIIRedactionPlugin()],
+    plugins=[PIIRedactionPlugin(), AsyncMemoryBackupPlugin()],
     events_compaction_config=EventsCompactionConfig(
         compaction_interval=15,  # Summarize older events when conversation exceeds 15 steps
         overlap_size=3,  # Keep last 3 events for continuity

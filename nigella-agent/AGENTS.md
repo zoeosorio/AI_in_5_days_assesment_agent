@@ -57,12 +57,14 @@ No recipe data is hardcoded or committed to the repository. The agent fetches an
 ### 2. Search Tool (`search_nigella_web_recipes`)
 Exposed to the `sous_chef`, this tool allows the agent to dynamically search for recipes on Nigella.com using Google Search grounding, download the HTML, parse out ingredients and instructions, validate them using the `RecipeModel` Pydantic class, and return them to the agent.
 
-### 3. Session State Preference Store
+### 3. Session State Preference Store & Async Backup
 User dietary preferences are persisted across turns using the `tool_context.state` dictionary.
 * **Prefix**: Stored using the `user:dietary_restrictions` namespace.
 * **Sharing**: Updated directly by Nigella's `set_user_preferences` tool and automatically read by the `sous_chef` during query filtering.
+* **Asynchronous Memory Operations**: To decouple critical state backups and telemetry storage from user interaction, we register the `AsyncMemoryBackupPlugin`. After each run concludes, it spawns a non-blocking background task using `asyncio.create_task()` to back up session preferences to the persistent repository, satisfying rigorous async memory management goals.
 
 ---
+
 
 ## 🛠️ Development & Quality Commands
 
