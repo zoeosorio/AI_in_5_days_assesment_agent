@@ -13,7 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os
 import re
 from typing import Optional
 
@@ -28,15 +27,12 @@ from google.adk.plugins.base_plugin import BasePlugin
 from google.adk.tools import (
     google_search,
     AgentTool,
-    FunctionTool,
     request_input,
 )
 from google.genai import types
 
 from .tools import (
-    search_database_recipes,
     search_nigella_web_recipes,
-    add_recipe_to_database,
     set_user_preferences,
     get_user_preferences,
 )
@@ -66,45 +62,19 @@ class PIIRedactionPlugin(BasePlugin):
         return event
 
 
-# Determine the running environment (defaults to development 'dev')
-is_dev = os.environ.get("ENVIRONMENT", "dev").lower() == "dev"
-
-# Human-In-The-Loop Confirmation Gate (Production only)
-add_recipe_tool = FunctionTool(add_recipe_to_database, require_confirmation=True)
-
-if is_dev:
-    # Dev Mode: Search Nigella.com directly, do not use/modify the database
-    sous_chef_tools = [search_nigella_web_recipes]
-    sous_chef_instruction = """You are a precise, detail-oriented Sous Chef running in a DEVELOPMENT environment.
-Your role is to search Nigella.com using the 'search_nigella_web_recipes' tool to query recipes directly from the web and parse them.
-Since this is a development environment, you must bypass the database and NEVER attempt to save recipes or read from the database.
-Always verify that suggested recipes comply with the user's dietary preferences (e.g. vegetarian, gluten-free) by checking the query criteria or active restrictions.
-Return the parsed recipe information directly and factually."""
-else:
-    # Production Mode: Search database, fall back to web query, insert with user approval
-    sous_chef_tools = [
-        search_database_recipes,
-        search_nigella_web_recipes,
-        add_recipe_tool,
-    ]
-    sous_chef_instruction = """You are a precise, detail-oriented Sous Chef running in a PRODUCTION environment.
-Your role is to query our recipe database using the 'search_database_recipes' tool first to find matching recipes.
-If no matches are found in the database, call 'search_nigella_web_recipes' to find matching recipes on the web.
-If you find a recipe on the web that is not in our database, you should save it to the database using the 'add_recipe_to_database' tool.
-Always verify that suggested recipes comply with the user's dietary preferences (e.g. vegetarian, gluten-free) by checking the query criteria or active restrictions.
-Return the recipe information or operation status directly and factually."""
-
-
-# Define the analytical Sous Chef agent
+# Define the analytical Sous Chef agent (Uses Gemini 3.5 Flash for fast web query searches)
 sous_chef = Agent(
     name="sous_chef",
     model=Gemini(
         model="gemini-3.5-flash",
         retry_options=types.HttpRetryOptions(attempts=3),
     ),
-    description="An analytical sous chef that queries the recipe database and dynamically imports recipes from Nigella.com.",
-    instruction=sous_chef_instruction,
-    tools=sous_chef_tools,
+    description="An analytical sous chef that queries recipes dynamically from Nigella.com.",
+    instruction="""You are a precise, detail-oriented Sous Chef.
+Your role is to search Nigella.com using the 'search_nigella_web_recipes' tool to query recipes directly from the web and parse them.
+Always verify that suggested recipes comply with the user's dietary preferences (e.g. vegetarian, gluten-free) by checking the query criteria or active restrictions.
+Return the parsed recipe information directly and factually.""",
+    tools=[search_nigella_web_recipes],
 )
 
 # Define the head chef root agent (Uses Gemini 3.5 Pro for rich persona writing and strict instructions compliance)

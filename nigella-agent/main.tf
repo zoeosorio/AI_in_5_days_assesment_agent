@@ -26,23 +26,12 @@ provider "google" {
 # --- Enable Required APIs ---
 resource "google_project_service" "services" {
   for_each = toset([
-    "firestore.googleapis.com",
     "aiplatform.googleapis.com",
     "logging.googleapis.com",
     "cloudtrace.googleapis.com",
   ])
   service            = each.key
   disable_on_destroy = false
-}
-
-# --- Provision Firestore (Session & Catalog Store) ---
-resource "google_firestore_database" "database" {
-  project     = var.project_id
-  name        = "(default)"
-  location_id = var.region
-  type        = "FIRESTORE_NATIVE"
-
-  depends_on = [google_project_service.services["firestore.googleapis.com"]]
 }
 
 # --- Provision Service Account for the Agent ---
@@ -56,12 +45,6 @@ resource "google_service_account" "agent_sa" {
 resource "google_project_iam_member" "vertex_ai_user" {
   project = var.project_id
   role    = "roles/aiplatform.user"
-  member  = "serviceAccount:${google_service_account.agent_sa.email}"
-}
-
-resource "google_project_iam_member" "firestore_user" {
-  project = var.project_id
-  role    = "roles/datastore.user"
   member  = "serviceAccount:${google_service_account.agent_sa.email}"
 }
 

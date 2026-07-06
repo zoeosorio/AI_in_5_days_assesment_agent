@@ -44,7 +44,9 @@ def get_session_service():
             base_dir=_AGENT_DIR, session_service_uri=uri
         )
     if agent_engine_id := os.environ.get("GOOGLE_CLOUD_AGENT_ENGINE_ID"):
-        from google.adk.sessions.vertex_ai_session_service import VertexAiSessionService
+        from google.adk.sessions.vertex_ai_session_service import (
+            VertexAiSessionService,
+        )
 
         return VertexAiSessionService(
             project=os.environ.get("GOOGLE_CLOUD_PROJECT"),
@@ -54,11 +56,11 @@ def get_session_service():
             or os.environ.get("GOOGLE_CLOUD_LOCATION"),
             agent_engine_id=agent_engine_id,
         )
-    from google.adk.integrations.firestore.firestore_session_service import (
-        FirestoreSessionService,
+    from google.adk.sessions.in_memory_session_service import (
+        InMemorySessionService,
     )
 
-    return FirestoreSessionService()
+    return InMemorySessionService()
 
 
 @functools.cache
