@@ -40,7 +40,23 @@ gcloud services enable \
 
 ---
 
+## 💾 Using Vertex AI Session Service Locally
+
+By default, running the standard `make playground` command uses in-memory session storage (preferences are lost when the process exits).
+
+To test persistent user preferences locally across playground and command line restarts, you can run the playground connected directly to Vertex AI's managed Session Service. Ensure you have completed the **Authentication Setup** and **Enable APIs** sections above, then run:
+
+```bash
+# Start playground connected to Vertex AI Session Service
+make playground-persist PROJECT_ID=your-gcp-project-id [REGION=us-central1]
+```
+
+This configures the ADK runner via the environment variable `SESSION_SERVICE_URI=agentengine://YOUR_PROJECT_ID/YOUR_REGION`. All user preference settings and conversation histories will be saved in Google Cloud's managed session storage.
+
+---
+
 ## 🚀 Deployment Steps
+
 
 You can deploy the agent using the provided `Makefile`:
 
