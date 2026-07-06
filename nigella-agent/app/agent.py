@@ -13,11 +13,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import re
+from typing import Optional
+
 from google.adk.agents import Agent
+from google.adk.agents.invocation_context import InvocationContext
 from google.adk.apps import App
+from google.adk.apps.app import EventsCompactionConfig
+from google.adk.apps.llm_event_summarizer import LlmEventSummarizer
+from google.adk.events import Event
 from google.adk.models import Gemini
+from google.adk.plugins.base_plugin import BasePlugin
+from google.adk.tools import google_search, AgentTool, FunctionTool
 from google.genai import types
-from google.adk.tools import google_search, AgentTool
 
 from .tools import (
     get_recipes,
@@ -26,7 +34,36 @@ from .tools import (
     search_and_add_recipes,
 )
 
-# Define the analytical Sous Chef agent
+
+# Custom PII Redaction Plugin
+class PIIRedactionPlugin(BasePlugin):
+    """Scans agent responses and redacts potential PII (emails and phone numbers)."""
+
+    def __init__(self) -> None:
+        super().__init__("pii_redaction_plugin")
+        self.email_regex = re.compile(r"[\w\.-]+@[\w\.-]+\.\w+")
+        self.phone_regex = re.compile(r"\b\d{3}[-.]?\d{3}[-.]?\d{4}\b")
+
+    def _redact(self, text: str) -> str:
+        text = self.email_regex.sub("[REDACTED_EMAIL]", text)
+        text = self.phone_regex.sub("[REDACTED_PHONE]", text)
+        return text
+
+    async def on_event_callback(
+        self, *, invocation_context: InvocationContext, event: Event
+    ) -> Optional[Event]:
+        if event.content and event.content.parts:
+            for part in event.content.parts:
+                if part.text:
+                    part.text = self._redact(part.text)
+        return event
+
+
+# Human-In-The-Loop Confirmation Gate
+search_and_add_tool = FunctionTool(search_and_add_recipes, require_confirmation=True)
+
+
+# Define the analytical Sous Chef agent (Uses Gemini 3.5 Flash for fast factual extraction)
 sous_chef = Agent(
     name="sous_chef",
     model=Gemini(
@@ -40,15 +77,15 @@ Always verify that suggested recipes comply with the user's dietary preferences 
 Return the raw recipe information or operation status directly and factually.""",
     tools=[
         get_recipes,
-        search_and_add_recipes,
+        search_and_add_tool,
     ],
 )
 
-# Define the head chef root agent, Nigella Lawson, using AgentTool to call the sous chef
+# Define the head chef root agent (Uses Gemini 3.5 Pro for rich persona writing and strict instructions compliance)
 root_agent = Agent(
     name="root_agent",
     model=Gemini(
-        model="gemini-3.5-flash",
+        model="gemini-3.5-pro",
         retry_options=types.HttpRetryOptions(attempts=3),
     ),
     instruction="""You are Nigella Lawson, the warm, intimate, and celebrated home cook.
@@ -71,7 +108,14 @@ Follow these guidelines:
 )
 
 
+# Define and configure the main app
 app = App(
     root_agent=root_agent,
     name="app",
+    plugins=[PIIRedactionPlugin()],
+    events_compaction_config=EventsCompactionConfig(
+        compaction_interval=15,  # Summarize older events when conversation exceeds 15 steps
+        overlap_size=3,  # Keep last 3 events for continuity
+        summarizer=LlmEventSummarizer(llm=Gemini(model="gemini-3.5-flash")),
+    ),
 )
