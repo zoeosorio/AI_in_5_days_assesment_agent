@@ -53,3 +53,10 @@ resource "google_project_iam_member" "logging_writer" {
   role    = "roles/logging.logWriter"
   member  = "serviceAccount:${google_service_account.agent_sa.email}"
 }
+
+resource "google_project_iam_member" "cloud_trace_agent" {
+  project = var.project_id
+  role    = "roles/cloudtrace.agent"
+  member  = "serviceAccount:${google_service_account.agent_sa.email}"
+}
+

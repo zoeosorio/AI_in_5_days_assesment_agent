@@ -27,18 +27,23 @@ gcloud auth application-default login
 
 ---
 
-## 🛠️ Enable APIs
+## 🛠️ Provision Infrastructure via Terraform
 
-Ensure the Vertex AI and Logging APIs are enabled in your target GCP project:
+We use Terraform to automatically enable the required Google Cloud APIs (Vertex AI, Logging, Cloud Trace), create a dedicated Service Account for the agent (`nigella-agent-sa`), and configure all necessary IAM permissions.
 
-```bash
-gcloud services enable \
-  aiplatform.googleapis.com \
-  logging.googleapis.com \
-  --project=YOUR_PROJECT_ID
-```
+1. **Initialize Terraform**:
+   ```bash
+   make tf-init
+   ```
+
+2. **Provision Resources**:
+   Apply the configuration to your project:
+   ```bash
+   make tf-apply PROJECT_ID=your-gcp-project-id [REGION=us-east1]
+   ```
 
 ---
+
 
 ## 💾 Using Vertex AI Session Service Locally
 

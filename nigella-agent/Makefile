@@ -1,6 +1,6 @@
 # Makefile for "What Would Nigella Do?" ADK Agent
 
-.PHONY: setup lint test playground playground-persist deploy
+.PHONY: setup lint test playground playground-persist deploy tf-init tf-apply
 
 # 1. Setup local python virtualenv and install ADK dependencies
 setup:
@@ -15,11 +15,26 @@ lint:
 test:
 	uv run pytest
 
-# 4. Start the interactive web playground to chat with Nigella locally (in-memory sessions)
+# 4. Initialize Terraform infrastructure configuration
+tf-init:
+	terraform init
+
+# 5. Provision all required GCP resources using Terraform
+# Usage: make tf-apply PROJECT_ID=your-gcp-project-id [REGION=us-east1]
+tf-apply:
+	@if [ -z "$(PROJECT_ID)" ]; then \
+		echo "Error: PROJECT_ID is required."; \
+		echo "Usage: make tf-apply PROJECT_ID=your-gcp-project-id [REGION=us-east1]"; \
+		exit 1; \
+	fi
+	$(eval REGION ?= us-east1)
+	terraform apply -var="project_id=$(PROJECT_ID)" -var="region=$(REGION)" -auto-approve
+
+# 6. Start the interactive web playground to chat with Nigella locally (in-memory sessions)
 playground:
 	GOOGLE_GENAI_USE_VERTEXAI=True agents-cli playground
 
-# 5. Start the interactive web playground using Vertex AI Session Service (persistent preferences)
+# 7. Start the interactive web playground using Vertex AI Session Service (persistent preferences)
 # Usage: make playground-persist PROJECT_ID=your-gcp-project-id [REGION=us-central1]
 playground-persist:
 	@if [ -z "$(PROJECT_ID)" ]; then \
@@ -32,7 +47,7 @@ playground-persist:
 	SESSION_SERVICE_URI=agentengine://$(PROJECT_ID)/$(REGION) \
 	agents-cli playground
 
-# 6. Deploy the agent to Google Cloud Vertex AI Agent Runtime
+# 8. Deploy the agent to Google Cloud Vertex AI Agent Runtime
 # Usage: make deploy PROJECT_ID=your-gcp-project-id [REGION=us-central1]
 deploy:
 	@if [ -z "$(PROJECT_ID)" ]; then \
