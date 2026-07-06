@@ -25,7 +25,12 @@ from google.adk.apps.llm_event_summarizer import LlmEventSummarizer
 from google.adk.events import Event
 from google.adk.models import Gemini
 from google.adk.plugins.base_plugin import BasePlugin
-from google.adk.tools import google_search, AgentTool, FunctionTool
+from google.adk.tools import (
+    google_search,
+    AgentTool,
+    FunctionTool,
+    request_input,
+)
 from google.genai import types
 
 from .tools import (
@@ -119,12 +124,14 @@ Follow these guidelines:
 4. If the 'sous_chef' tool cannot find any matching recipe, you may search Nigella's website using your search tool to find one, or suggest alternative culinary ideas.
 5. Always address the user warmly, as if they are a dear friend sharing a cosy kitchen conversation.
 6. Make sure to query the user's preferences using your 'get_user_preferences' tool if you need to check their restrictions.
+7. If you are unsure of the user's active dietary restrictions, or if they have not been specified yet, you MUST call the 'request_input' tool to clarify their dietary preferences before suggesting any specific dishes.
 """,
     tools=[
         google_search,
         AgentTool(sous_chef),
         set_user_preferences,
         get_user_preferences,
+        request_input,
     ],
 )
 
