@@ -17,6 +17,8 @@ import json
 import re
 import urllib.request
 
+from typing import Union
+
 from google import genai
 from google.adk.tools import ToolContext
 from google.genai import types
@@ -162,69 +164,86 @@ def set_user_preferences(
         dietary_restrictions: A list of dietary restrictions (e.g., ['vegetarian', 'gluten-free']).
 
     Returns:
-        A confirmation message string.
+        A confirmation message string or an error with recovery instructions.
     """
-    # Log Intent
-    logger.info(
-        json.dumps(
-            {
-                "event": "tool_intent",
-                "tool": "set_user_preferences",
-                "params": {"dietary_restrictions": dietary_restrictions},
-            }
+    try:
+        # Log Intent
+        logger.info(
+            json.dumps(
+                {
+                    "event": "tool_intent",
+                    "tool": "set_user_preferences",
+                    "params": {"dietary_restrictions": dietary_restrictions},
+                }
+            )
         )
-    )
 
-    clean_restrictions = [r.strip() for r in dietary_restrictions if r.strip()]
-    tool_context.state["user:dietary_restrictions"] = clean_restrictions
+        clean_restrictions = [r.strip() for r in dietary_restrictions if r.strip()]
+        tool_context.state["user:dietary_restrictions"] = clean_restrictions
 
-    message = (
-        f"Successfully updated your dietary preferences to: {clean_restrictions}. "
-        "To reset or clear your preferences, pass an empty list [] as input."
-    )
-
-    # Log Outcome
-    logger.info(
-        json.dumps(
-            {
-                "event": "tool_outcome",
-                "tool": "set_user_preferences",
-                "status": "success",
-                "restrictions_count": len(clean_restrictions),
-            }
+        message = (
+            f"Successfully updated your dietary preferences to: {clean_restrictions}. "
+            "To reset or clear your preferences, pass an empty list [] as input."
         )
-    )
 
-    return message
+        # Log Outcome
+        logger.info(
+            json.dumps(
+                {
+                    "event": "tool_outcome",
+                    "tool": "set_user_preferences",
+                    "status": "success",
+                    "restrictions_count": len(clean_restrictions),
+                }
+            )
+        )
+        return message
+    except Exception as e:
+        logger.error(f"Error saving preferences: {e}")
+        return (
+            f"ERROR: Failed to save preferences due to: {e}. "
+            "Recovery instructions: Inform the user that you had trouble saving their preferences. "
+            "Proceed with the recipe suggestions, but ask them to confirm if the recipes comply with their restrictions "
+            "since they could not be saved to session memory."
+        )
 
 
-def get_user_preferences(tool_context: ToolContext) -> list[str]:
+def get_user_preferences(tool_context: ToolContext) -> Union[list[str], str]:
     """Retrieves the user's saved dietary preferences.
 
     Returns:
-        The user's currently stored dietary restrictions list.
+        The user's currently stored dietary restrictions list, or an error string with recovery instructions.
     """
-    # Log Intent
-    logger.info(json.dumps({"event": "tool_intent", "tool": "get_user_preferences"}))
+    try:
+        # Log Intent
+        logger.info(json.dumps({"event": "tool_intent", "tool": "get_user_preferences"}))
 
-    prefs = tool_context.state.get("user:dietary_restrictions", [])
+        prefs = tool_context.state.get("user:dietary_restrictions", [])
 
-    # Log Outcome
-    logger.info(
-        json.dumps(
-            {
-                "event": "tool_outcome",
-                "tool": "get_user_preferences",
-                "status": "success",
-                "preferences": prefs,
-            }
+        # Log Outcome
+        logger.info(
+            json.dumps(
+                {
+                    "event": "tool_outcome",
+                    "tool": "get_user_preferences",
+                    "status": "success",
+                    "preferences": prefs,
+                }
+            )
         )
-    )
 
-    return prefs
+        return prefs
+    except Exception as e:
+        logger.error(f"Error retrieving preferences: {e}")
+        return (
+            f"ERROR: Failed to retrieve user preferences due to: {e}. "
+            "Recovery instructions: Assume no active restrictions are stored. "
+            "Apologize to the user and explain that you had trouble reading their stored preferences. "
+            "Politely ask them if they have any dietary restrictions before suggesting any recipes."
+        )
 
 
-def search_nigella_web_recipes(query: str, max_results: int = 1) -> list[RecipeSummary]:
+def search_nigella_web_recipes(query: str, max_results: int = 1) -> Union[list[RecipeSummary], str]:
     """Searches Nigella.com for recipes matching the query and returns their summaries.
 
     Args:
@@ -232,7 +251,7 @@ def search_nigella_web_recipes(query: str, max_results: int = 1) -> list[RecipeS
         max_results: The maximum number of recipe matches to return. Default is 1.
 
     Returns:
-        A list of matching recipe summaries.
+        A list of matching recipe summaries, or an error string with recovery instructions.
     """
     # Log Intent
     logger.info(
@@ -275,7 +294,11 @@ def search_nigella_web_recipes(query: str, max_results: int = 1) -> list[RecipeS
                 }
             )
         )
-        return []
+        return (
+            "ERROR: The recipe search service encountered a connection issue. "
+            "Recovery instructions: Apologize to the user and explain that you had trouble searching Nigella.com. "
+            "Ask them to suggest a different recipe keyword, or try another query with slightly different keywords."
+        )
 
     summaries = []
     if urls:
@@ -300,14 +323,14 @@ def search_nigella_web_recipes(query: str, max_results: int = 1) -> list[RecipeS
     return summaries
 
 
-def get_recipe_details(url: str) -> RecipeDetail:
+def get_recipe_details(url: str) -> Union[RecipeDetail, str]:
     """Fetches the full ingredients and step-by-step instructions for a recipe by its URL.
 
     Args:
         url: The direct URL of the recipe page on Nigella.com.
 
     Returns:
-        A RecipeDetail containing ingredients and instructions.
+        A RecipeDetail containing ingredients and instructions, or an error string with recovery instructions.
     """
     # Log Intent
     logger.info(
@@ -327,11 +350,11 @@ def get_recipe_details(url: str) -> RecipeDetail:
         output = detail
     else:
         status = "error"
-        output = RecipeDetail(
-            name="Unknown",
-            ingredients=[],
-            instructions="Failed to fetch instructions. Please verify the URL and your network connection.",
-            equipment=[],
+        output = (
+            "ERROR: Failed to retrieve recipe details from the URL. "
+            "Recovery instructions: Do not call get_recipe_details again with the same URL. "
+            "Explain to the user that you had trouble reading that specific recipe page. "
+            "Offer to search for a different recipe title, or ask if they have another recipe they want you to look up."
         )
 
     # Log Outcome
