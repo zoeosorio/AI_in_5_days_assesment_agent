@@ -1,6 +1,6 @@
 # Makefile for "What Would Nigella Do?" ADK Agent
 
-.PHONY: setup lint test playground playground-persist deploy tf-init tf-apply
+.PHONY: setup lint test playground playground-persist deploy tf-init tf-apply teardown
 
 # 1. Setup local python virtualenv and install ADK dependencies
 setup:
@@ -61,3 +61,26 @@ deploy:
 		--project $(PROJECT_ID) \
 		--region $(REGION) \
 		--no-confirm-project
+
+# 9. Clean up all deployed cloud resources (Reasoning Engine instance & Terraform resources)
+# Usage: make teardown PROJECT_ID=your-gcp-project-id
+teardown:
+	@if [ -z "$(PROJECT_ID)" ]; then \
+		echo "Error: PROJECT_ID is required."; \
+		echo "Usage: make teardown PROJECT_ID=your-gcp-project-id"; \
+		exit 1; \
+	fi
+	@if [ -f deployment_metadata.json ]; then \
+		RESOURCE_ID=$$(jq -r '.remote_agent_runtime_id' deployment_metadata.json | awk -F'/' '{print $$NF}'); \
+		echo "Deleting Reasoning Engine $$RESOURCE_ID in $(PROJECT_ID)..."; \
+		curl -X DELETE \
+			-H "Authorization: Bearer $$(gcloud auth print-access-token)" \
+			-H "Content-Type: application/json" \
+			"https://us-central1-aiplatform.googleapis.com/v1/projects/$(PROJECT_ID)/locations/us-central1/reasoningEngines/$$RESOURCE_ID"; \
+		rm -f deployment_metadata.json; \
+	else \
+		echo "No deployment_metadata.json found. Skipping Reasoning Engine deletion."; \
+	fi
+	@echo "Destroying Terraform infrastructure..."
+	terraform destroy -var="project_id=$(PROJECT_ID)" -auto-approve
+
