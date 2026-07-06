@@ -13,10 +13,14 @@
 # limitations under the License.
 
 import html
+import math
 import re
 import urllib.request
 
+from google import genai
 from google.cloud import firestore
+from google.cloud.firestore_v1.base_vector_query import DistanceMeasure
+from google.cloud.firestore_v1.vector import Vector
 from pydantic import BaseModel, Field
 
 RECIPE_URLS = [
@@ -45,10 +49,39 @@ class RecipeModel(BaseModel):
         description="Dietary tags (e.g. 'vegetarian', 'gluten-free').",
     )
     instructions: str = Field(..., description="Step-by-step cooking instructions.")
+    embedding: list[float] = Field(
+        default_factory=list,
+        description="768-dimension vector embedding of the recipe name and description.",
+    )
 
 
-# Initialize Firestore client (synchronous for tools execution compatibility)
+# Initialize Clients
 db = firestore.Client()
+ai_client = genai.Client()
+_db_initialized = False
+
+
+def _get_embedding(text: str) -> list[float]:
+    """Generates 768-dimension text embedding using Vertex AI text-embedding-004 model."""
+    try:
+        response = ai_client.models.embed_content(
+            model="text-embedding-004",
+            contents=text,
+        )
+        return response.embeddings[0].values
+    except Exception as e:
+        print(f"Error generating embedding: {e}")
+        return []
+
+
+def _cosine_similarity(v1: list[float], v2: list[float]) -> float:
+    """Calculates cosine similarity between two float vectors."""
+    dot_product = sum(x * y for x, y in zip(v1, v2, strict=False))
+    magnitude1 = math.sqrt(sum(x * x for x in v1))
+    magnitude2 = math.sqrt(sum(y * y for y in v2))
+    if magnitude1 == 0 or magnitude2 == 0:
+        return 0.0
+    return dot_product / (magnitude1 * magnitude2)
 
 
 def fetch_and_parse_recipe(url: str) -> RecipeModel | None:
@@ -131,6 +164,9 @@ def fetch_and_parse_recipe(url: str) -> RecipeModel | None:
     elif "Linguine" in name:
         equipment = ["pot", "knife", "large bowl"]
 
+    # Compute embedding
+    embedding = _get_embedding(f"{name}: {description}")
+
     try:
         return RecipeModel(
             name=name,
@@ -141,6 +177,7 @@ def fetch_and_parse_recipe(url: str) -> RecipeModel | None:
             ingredients=ingredients,
             dietary_tags=tags,
             instructions=instructions_text,
+            embedding=embedding,
         )
     except Exception:
         return None
@@ -161,12 +198,22 @@ def init_db() -> None:
         print(f"Error seeding Firestore: {e}")
 
 
+def ensure_db_initialized() -> None:
+    """Ensures database seeding is performed lazily and only once per process."""
+    global _db_initialized
+    if _db_initialized:
+        return
+    init_db()
+    _db_initialized = True
+
+
 def query_recipes_db(
     query: str | None = None,
     max_prep_time: int | None = None,
     max_cook_time: int | None = None,
 ) -> list[RecipeModel]:
-    """Queries Firestore and returns matching RecipeModel list."""
+    """Queries Firestore using vector similarity search for query query with a local cosine fallback."""
+    ensure_db_initialized()
     try:
         ref = db.collection("recipes")
         if max_prep_time is not None:
@@ -178,17 +225,41 @@ def query_recipes_db(
                 filter=firestore.FieldFilter("cook_time", "<=", max_cook_time)
             )
 
+        if query:
+            query_vector = _get_embedding(query)
+            if query_vector:
+                try:
+                    # Native Firestore Vector Search (Requires vector index created on Firestore field 'embedding')
+                    vector_query = ref.find_nearest(
+                        vector_field="embedding",
+                        query_vector=Vector(query_vector),
+                        distance_measure=DistanceMeasure.COSINE,
+                        limit=5,
+                    )
+                    docs = vector_query.stream()
+                    return [RecipeModel(**doc.to_dict()) for doc in docs]
+                except Exception as ve:
+                    # Local fallback to Python similarity in case the database index is still provisioning/missing
+                    print(
+                        f"Warning: Firestore vector index query failed ({ve}). Falling back to local cosine calculation."
+                    )
+                    docs = ref.stream()
+                    candidate_recipes = []
+                    for doc in docs:
+                        data = doc.to_dict()
+                        recipe = RecipeModel(**data)
+                        if recipe.embedding:
+                            similarity = _cosine_similarity(
+                                recipe.embedding, query_vector
+                            )
+                            candidate_recipes.append((similarity, recipe))
+                    # Sort candidates by similarity descending
+                    candidate_recipes.sort(key=lambda x: x[0], reverse=True)
+                    return [recipe for sim, recipe in candidate_recipes[:5]]
+
+        # Fallback to standard streaming query if no search query string
         docs = ref.stream()
-        recipes = []
-        for doc in docs:
-            data = doc.to_dict()
-            recipe = RecipeModel(**data)
-            if query:
-                q = query.lower()
-                if q not in recipe.name.lower() and q not in recipe.description.lower():
-                    continue
-            recipes.append(recipe)
-        return recipes
+        return [RecipeModel(**doc.to_dict()) for doc in docs]
     except Exception as e:
         print(f"Error querying Firestore: {e}")
         return []
@@ -196,6 +267,10 @@ def query_recipes_db(
 
 def insert_recipe(recipe: RecipeModel) -> bool:
     """Inserts a single RecipeModel into Firestore recipes collection. Returns True if successful."""
+    # Ensure embedding is set
+    if not recipe.embedding:
+        recipe.embedding = _get_embedding(f"{recipe.name}: {recipe.description}")
+
     try:
         # Create a document ID based on lowercase recipe name to prevent duplicates
         doc_id = re.sub(r"[^a-zA-Z0-9]+", "-", recipe.name.lower()).strip("-")
@@ -205,7 +280,3 @@ def insert_recipe(recipe: RecipeModel) -> bool:
     except Exception as e:
         print(f"Error inserting into Firestore: {e}")
         return False
-
-
-# Seeding database
-init_db()
