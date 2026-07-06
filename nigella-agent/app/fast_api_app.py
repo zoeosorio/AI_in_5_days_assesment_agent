@@ -51,6 +51,11 @@ AGENT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # Seed database with initial recipes if empty on startup
+    from app.scraper import seed_database_if_empty
+
+    seed_database_if_empty()
+
     # Runner for the A2A path, sharing the same session/artifact services as the
     # adk_api and reasoning_engine paths (see services.py). Imported here so the
     # agent is built after env/telemetry setup.

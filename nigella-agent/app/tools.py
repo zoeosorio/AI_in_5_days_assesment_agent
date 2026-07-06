@@ -22,12 +22,13 @@ from pydantic import BaseModel, Field
 
 from .database import (
     RecipeModel,
-    fetch_and_parse_recipe,
     insert_recipe,
     query_recipes_db,
 )
+from .scraper import fetch_and_parse_recipe
 
 logger = logging.getLogger("app.tools")
+ai_client = genai.Client()
 
 
 # Strict Output Schemas
@@ -59,20 +60,29 @@ class GetUserPreferencesOutput(BaseModel):
     )
 
 
-class SearchAndAddRecipesOutput(BaseModel):
+class AddRecipeToDatabaseOutput(BaseModel):
     status: str = Field(
         ..., description="The status of the operation ('success' or 'error')."
     )
     message: str = Field(
-        ...,
-        description="Descriptive outcome status with clear troubleshooting/recovery actions if no recipes were added.",
-    )
-    added_recipes: list[str] = Field(
-        ..., description="The list of recipe titles successfully imported."
+        ..., description="Outcome details with troubleshooting instructions."
     )
 
 
-def get_recipes(
+def _get_embedding(text: str) -> list[float]:
+    """Generates 768-dimension text embedding using Vertex AI text-embedding-004 model."""
+    try:
+        response = ai_client.models.embed_content(
+            model="text-embedding-004",
+            contents=text,
+        )
+        return response.embeddings[0].values
+    except Exception as e:
+        logger.error(f"Error generating embedding: {e}")
+        return []
+
+
+def search_database_recipes(
     query: str | None = None,
     max_prep_time: int | None = None,
     max_cook_time: int | None = None,
@@ -99,7 +109,7 @@ def get_recipes(
         json.dumps(
             {
                 "event": "tool_intent",
-                "tool": "get_recipes",
+                "tool": "search_database_recipes",
                 "params": {
                     "query": query,
                     "max_prep_time": max_prep_time,
@@ -119,9 +129,14 @@ def get_recipes(
             for r in tool_context.state.get("user:dietary_restrictions", [])
         ]
 
-    # Perform filtered query using SQLAlchemy
+    # Generate Query Vector Embedding
+    query_vector = None
+    if query:
+        query_vector = _get_embedding(query)
+
+    # Perform filtered query
     results = query_recipes_db(
-        query=query,
+        query_vector=query_vector,
         max_prep_time=max_prep_time,
         max_cook_time=max_cook_time,
     )
@@ -147,7 +162,7 @@ def get_recipes(
         json.dumps(
             {
                 "event": "tool_outcome",
-                "tool": "get_recipes",
+                "tool": "search_database_recipes",
                 "status": "success",
                 "results_count": len(filtered_recipes),
             }
@@ -237,24 +252,22 @@ class _URLList(BaseModel):
     urls: list[str]
 
 
-def search_and_add_recipes(
-    query: str, max_results: int = 1, tool_context: ToolContext | None = None
-) -> SearchAndAddRecipesOutput:
-    """Searches Nigella.com for recipes matching the query and adds them to the SQLite database.
+def search_nigella_web_recipes(query: str, max_results: int = 1) -> GetRecipesOutput:
+    """Searches Nigella.com for recipes matching the query and returns the parsed recipes directly.
 
     Args:
         query: The search query (e.g. 'lemon cake', 'chocolate cookies').
-        max_results: The maximum number of recipe matches to add. Default is 1.
+        max_results: The maximum number of recipe matches to return. Default is 1.
 
     Returns:
-        A structured SearchAndAddRecipesOutput.
+        A structured GetRecipesOutput.
     """
     # Log Intent
     logger.info(
         json.dumps(
             {
                 "event": "tool_intent",
-                "tool": "search_and_add_recipes",
+                "tool": "search_nigella_web_recipes",
                 "params": {"query": query, "max_results": max_results},
             }
         )
@@ -280,75 +293,86 @@ def search_and_add_recipes(
             response.parsed.urls if (response.parsed and response.parsed.urls) else []
         )
     except Exception as e:
-        err_msg = (
-            f"Failed during web search: {e}. "
-            "Troubleshooting: Please check your internet connectivity, confirm that "
-            "the Google GenAI client is authenticated, and verify that the Vertex AI "
-            "Search service is enabled."
-        )
         logger.error(
             json.dumps(
                 {
                     "event": "tool_outcome",
-                    "tool": "search_and_add_recipes",
+                    "tool": "search_nigella_web_recipes",
                     "status": "error",
                     "error": str(e),
                 }
             )
         )
-        return SearchAndAddRecipesOutput(
-            status="error", message=err_msg, added_recipes=[]
-        )
+        return GetRecipesOutput(status="error", recipes=[])
 
-    if not urls:
-        warn_msg = (
-            f"No recipes matching '{query}' were found on Nigella.com. "
-            "Recovery: Try expanding your search term (e.g., search for 'chicken' instead of "
-            "'spatchcock chicken') or verify spelling."
-        )
-        logger.info(
-            json.dumps(
-                {
-                    "event": "tool_outcome",
-                    "tool": "search_and_add_recipes",
-                    "status": "success",
-                    "added_recipes_count": 0,
-                }
-            )
-        )
-        return SearchAndAddRecipesOutput(
-            status="success", message=warn_msg, added_recipes=[]
-        )
+    recipes = []
+    if urls:
+        for url in urls:
+            recipe = fetch_and_parse_recipe(url)
+            if recipe:
+                recipes.append(recipe)
 
-    added = []
-    for url in urls:
-        recipe = fetch_and_parse_recipe(url)
-        if recipe:
-            if insert_recipe(recipe):
-                added.append(recipe.name)
-
-    if added:
-        msg = f"Successfully fetched and added {len(added)} recipe(s) to the local database."
-        status = "success"
-    else:
-        msg = (
-            "Found matching URLs, but they were already present in the database "
-            "or could not be parsed. Recovery: Try searching for a different dish."
-        )
-        status = "success"
-
-    output = SearchAndAddRecipesOutput(status=status, message=msg, added_recipes=added)
+    output = GetRecipesOutput(status="success" if recipes else "empty", recipes=recipes)
 
     # Log Outcome
     logger.info(
         json.dumps(
             {
                 "event": "tool_outcome",
-                "tool": "search_and_add_recipes",
-                "status": status,
-                "added_recipes": added,
+                "tool": "search_nigella_web_recipes",
+                "status": "success",
+                "recipes_count": len(recipes),
             }
         )
     )
 
     return output
+
+
+def add_recipe_to_database(recipe: RecipeModel) -> AddRecipeToDatabaseOutput:
+    """Saves a parsed recipe into the persistent database.
+
+    Args:
+        recipe: The RecipeModel object representing the recipe to save.
+
+    Returns:
+        A structured AddRecipeToDatabaseOutput.
+    """
+    # Log Intent
+    logger.info(
+        json.dumps(
+            {
+                "event": "tool_intent",
+                "tool": "add_recipe_to_database",
+                "recipe": recipe.name,
+            }
+        )
+    )
+
+    # Generate Embeddings for Recipe
+    if not recipe.embedding:
+        recipe.embedding = _get_embedding(f"{recipe.name}: {recipe.description}")
+
+    success = insert_recipe(recipe)
+    if success:
+        status = "success"
+        msg = f"Successfully saved recipe '{recipe.name}' to the database."
+    else:
+        status = "error"
+        msg = (
+            f"Failed to save recipe '{recipe.name}' to the database. "
+            "Troubleshooting: Please check database connection parameters."
+        )
+
+    # Log Outcome
+    logger.info(
+        json.dumps(
+            {
+                "event": "tool_outcome",
+                "tool": "add_recipe_to_database",
+                "status": status,
+            }
+        )
+    )
+
+    return AddRecipeToDatabaseOutput(status=status, message=msg)
